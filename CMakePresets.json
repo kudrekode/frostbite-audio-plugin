@@ -1,0 +1,9 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {"name":"windows-x64","displayName":"Windows x64 / Visual Studio 2022","generator":"Visual Studio 17 2022","architecture":"x64","binaryDir":"${sourceDir}/build"},
+    {"name":"dsp-only","inherits":"windows-x64","binaryDir":"${sourceDir}/build-dsp","cacheVariables":{"FROSTBITE_BUILD_PLUGIN":"OFF"}}
+  ],
+  "buildPresets":[{"name":"release","configurePreset":"windows-x64","configuration":"Release","jobs":3}],
+  "testPresets":[{"name":"release","configurePreset":"windows-x64","configuration":"Release","output":{"outputOnFailure":true}}]
+}
