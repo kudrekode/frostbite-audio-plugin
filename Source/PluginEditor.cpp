@@ -5,6 +5,17 @@ const juce::Colour ink{0xff090f14},panel{0xff101a22},ice{0xffb9e7f4},steel{0xff6
 juce::Font font(float height,bool bold=false) {
     return juce::Font(juce::FontOptions("Bahnschrift",height,bold?juce::Font::bold:juce::Font::plain));
 }
+void flushNativeRepaints(juce::Component& component) {
+   #if JUCE_WINDOWS
+    // JUCE 9's software peer queues dirty rectangles until its DXGI vblank callback.
+    // Some host/display combinations stop delivering that callback. Flush existing
+    // invalidations on the GUI thread; this does not request a full-window repaint.
+    if(juce::MessageManager::getInstance()->isThisTheMessageThread())
+        if(auto* peer=component.getPeer()) peer->performAnyPendingRepaintsNow();
+   #else
+    juce::ignoreUnused(component);
+   #endif
+}
 void text(juce::Graphics& g,juce::String s,juce::Rectangle<float> r,float size,juce::Colour colour,
           juce::Justification justify=juce::Justification::centredLeft) {
     g.setColour(colour); g.setFont(font(size)); g.drawText(s,r,justify);
@@ -27,12 +38,14 @@ void FrostLookAndFeel::drawRotarySlider(juce::Graphics& g,int x,int y,int width,
     const auto area=juce::Rectangle<float>(float(x),float(y),float(width),float(height)).reduced(9);
     const auto centre=area.getCentre(); const float radius=std::min(area.getWidth(),area.getHeight())*.5f;
     const auto accent=s.findColour(juce::Slider::rotarySliderFillColourId);
+    const float position=juce::jlimit(0.0f,1.0f,pos);
+    const float angle=start+position*(end-start);
     juce::Path track,active;
     track.addCentredArc(centre.x,centre.y,radius,radius,0,start,end,true);
-    active.addCentredArc(centre.x,centre.y,radius,radius,0,start,start+pos*(end-start),true);
+    if(position>0) active.addCentredArc(centre.x,centre.y,radius,radius,0,start,angle,true);
     g.setColour(juce::Colour(0xff263641)); g.strokePath(track,juce::PathStrokeType(2));
     g.setColour(accent.withAlpha(.10f)); g.strokePath(active,juce::PathStrokeType(8));
-    g.setColour(accent); g.strokePath(active,juce::PathStrokeType(2));
+    g.setColour(accent); g.strokePath(active,juce::PathStrokeType(3));
     for(int i=0;i<=20;++i) {
         const float a=start+(end-start)*float(i)/20;
         const auto p1=centre+juce::Point<float>(std::sin(a),-std::cos(a))*(radius+5);
@@ -46,10 +59,10 @@ void FrostLookAndFeel::drawRotarySlider(juce::Graphics& g,int x,int y,int width,
     g.fillEllipse(dial);
     g.setColour(juce::Colour(0xff415460)); g.drawEllipse(dial.reduced(.5f),.7f);
     g.setColour(juce::Colour(0xff15232d)); g.drawEllipse(dial.reduced(4),1);
-    const float angle=start+pos*(end-start);
     const auto direction=juce::Point<float>(std::sin(angle),-std::cos(angle));
     g.setColour(accent);
-    g.drawLine({centre+direction*radius*.45f,centre+direction*radius*.67f},2.5f);
+    g.drawLine({centre+direction*radius*.40f,centre+direction*radius*.70f},3);
+    g.fillEllipse(juce::Rectangle<float>(4,4).withCentre(centre+direction*radius*.70f));
     if(s.hasKeyboardFocus(false)) { g.setColour(ice.withAlpha(.8f)); g.drawEllipse(dial.expanded(4),1); }
 }
 void FrostLookAndFeel::drawButtonBackground(juce::Graphics& g,juce::Button& b,const juce::Colour&,bool over,bool down) {
@@ -84,17 +97,29 @@ FrostKnob::FrostKnob(FrostbiteAudioProcessor& p,size_t i):index(i) {
     slider.setMouseDragSensitivity(180);
     slider.setWantsKeyboardFocus(true);
     slider.setTitle(info.name);
+    slider.setComponentID(info.id);
     slider.setTooltip(juce::String(info.name)+". Double-click to reset. Hold Shift for fine adjustment. Arrow keys adjust.");
     addAndMakeVisible(slider);
+    // JUCE owns value/readout repainting. This callback only invalidates our engine-state title.
+    slider.onValueChange=[this] { repaint(0,0,getWidth(),27); flushNativeRepaints(*this); };
     attachment=std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(p.state,info.id,slider);
 }
 void FrostKnob::resized() { slider.setBounds(getLocalBounds().withTrimmedTop(23).reduced(4,0)); }
+void FrostKnob::focusOfChildComponentChanged(FocusChangeType) { repaint(0,0,getWidth(),27); }
 void FrostKnob::paint(juce::Graphics& g) {
+    const auto accent=index==frostbite::Damage?amber:ice;
+    const bool selected=slider.hasKeyboardFocus(true);
     text(g,juce::String(frostbite::parameterInfo[index].name).toUpperCase(),{0,0,float(getWidth()),21},11,
-        index==frostbite::Damage?amber:steel,juce::Justification::centred);
+        selected?accent:index==frostbite::Damage?amber:steel,juce::Justification::centred);
+    if(index<=frostbite::Motion) {
+        g.setColour(slider.getValue()>slider.getMinimum()?accent:steel.withAlpha(.25f));
+        g.fillEllipse(float(getWidth())*.5f-2,21,4,4);
+    }
 }
 
 FrostbiteAudioProcessorEditor::FrostbiteAudioProcessorEditor(FrostbiteAudioProcessor& p):AudioProcessorEditor(p),processor(p) {
+    // The editor fills its entire background, including for partial native-window repaints.
+    setOpaque(true);
     setLookAndFeel(&look); addAndMakeVisible(surface);
     for(size_t i=0;i<frostbite::Count;++i) {
         if(i==frostbite::Capture || i==frostbite::Bypass || i==frostbite::EchoSync || i==frostbite::EchoDivision || i==frostbite::Character) continue;
@@ -105,6 +130,15 @@ FrostbiteAudioProcessorEditor::FrostbiteAudioProcessorEditor(FrostbiteAudioProce
     capture.setTooltip("Capture the preceding 1.5 seconds once. Release fades the held grains. Play audio before capturing.");
     bypass.setTooltip("Crossfade to unprocessed input. Effects continue internally, preserving tails when re-enabled.");
     advanced.setTooltip("Show the sound engine controls.");
+    capture.onStateChange=[this] {
+        const juce::String label=capture.getToggleState()?"RELEASE":"CAPTURE";
+        if(capture.getButtonText()!=label) {
+            capture.setButtonText(label); repaint(getLocalArea(&surface,juce::Rectangle<int>(28,98,944,254)));
+            flushNativeRepaints(*this);
+        }
+    };
+    bypass.onStateChange=[this] { repaint(getLocalArea(&surface,juce::Rectangle<int>(66,58,294,16))); flushNativeRepaints(*this); };
+    sync.onStateChange=[this] { flushNativeRepaints(*this); };
     captureAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.state,"capture",capture);
     bypassAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.state,"bypass",bypass);
     syncAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.state,"echo_sync",sync);
@@ -117,22 +151,34 @@ FrostbiteAudioProcessorEditor::FrostbiteAudioProcessorEditor(FrostbiteAudioProce
     next.onClick=[this]{processor.setCurrentProgram((processor.getCurrentProgram()+1)%8);};
     save.onClick=[this]{choosePreset(true);}; load.onClick=[this]{choosePreset(false);};
     init.onClick=[this]{processor.restoreDefaults();};
-    advanced.onClick=[this]{details=!details; advanced.setToggleState(details,juce::dontSendNotification); layoutSurface(); repaint();};
+    advanced.onClick=[this]{details=!details; advanced.setToggleState(details,juce::dontSendNotification); layoutSurface(); repaint(); flushNativeRepaints(*this);};
     const juce::StringArray labels{"FROZEN","ECHO","ABYSS","CHARACTER"};
     for(int i=0;i<4;++i) {
         tabs[size_t(i)].setButtonText(labels[i]); surface.addAndMakeVisible(tabs[size_t(i)]);
-        tabs[size_t(i)].onClick=[this,i]{page=i; layoutSurface(); repaint();};
+        tabs[size_t(i)].onClick=[this,i]{page=i; layoutSurface(); repaint(); flushNativeRepaints(*this);};
     }
     division.addItemList({"1/16","1/8","1/8 T","1/4","1/8 D","1/4 T","1/2","1/4 D","1/1"},1);
     character.addItemList({"WARM","BROKEN"},1);
     surface.addAndMakeVisible(division); surface.addAndMakeVisible(character);
     divisionAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(p.state,"echo_division",division);
     characterAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(p.state,"character",character);
+    division.onChange=[this] { flushNativeRepaints(*this); };
+    character.onChange=[this] { flushNativeRepaints(*this); };
     setResizable(true,true); setResizeLimits(800,560,1600,1120);
     getConstrainer()->setFixedAspectRatio(1000.0/700.0);
     setSize(1000,700); startTimerHz(24);
 }
 FrostbiteAudioProcessorEditor::~FrostbiteAudioProcessorEditor() { stopTimer(); setLookAndFeel(nullptr); }
+void FrostbiteAudioProcessorEditor::parentHierarchyChanged() {
+   #if JUCE_WINDOWS
+    // Studio One can present a stale Direct2D surface while slider/host values keep
+    // changing. Select JUCE's GDI software backend when the host peer is attached.
+    if(auto* peer=getPeer()) {
+        const auto software=peer->getAvailableRenderingEngines().indexOf("Software Renderer");
+        if(software>=0 && peer->getCurrentRenderingEngine()!=software) peer->setCurrentRenderingEngine(software);
+    }
+   #endif
+}
 void FrostbiteAudioProcessorEditor::resized() {
     const float scale=std::min(float(getWidth())/1000,float(getHeight())/700);
     surface.setTransform(juce::AffineTransform::scale(scale)); surface.setBounds(0,0,1000,700); layoutSurface();
@@ -167,7 +213,8 @@ void FrostbiteAudioProcessorEditor::paint(juce::Graphics& g) {
     juce::Path mark; mark.startNewSubPath(28,29); mark.lineTo(53,29); mark.lineTo(42,43); mark.lineTo(51,43); mark.lineTo(30,64); mark.lineTo(36,46); mark.lineTo(28,46); mark.closeSubPath();
     g.setColour(ice); g.fillPath(mark);
     g.setFont(font(27,true)); g.setColour(white); g.drawText("F R O S T B I T E",66,24,294,34,juce::Justification::centredLeft);
-    text(g,"ATMOSPHERIC AUDIO ENGINE",{68,58,260,16},9,steel);
+    text(g,bypass.getToggleState()?"BYPASSED / DRY SIGNAL":"ATMOSPHERIC AUDIO ENGINE",{68,58,260,16},9,
+         bypass.getToggleState()?amber:steel);
     g.setColour(steel.withAlpha(.18f)); g.drawHorizontalLine(86,28,972);
     auto display=juce::Rectangle<float>(28,98,944,254);
     g.setGradientFill(juce::ColourGradient(juce::Colour(0xff142733),500,98,juce::Colour(0xff0a151e),500,352,false));
@@ -219,14 +266,21 @@ void FrostbiteAudioProcessorEditor::paint(juce::Graphics& g) {
     meter(788,input,"IN"); meter(902,output,"OUT");
 }
 void FrostbiteAudioProcessorEditor::timerCallback() {
+    if(!isShowing()) return;
     input=std::max(processor.inputMeter.load(std::memory_order_relaxed),input*.88f);
     output=std::max(processor.outputMeter.load(std::memory_order_relaxed),output*.88f);
     const auto head=processor.scopeHead.load(std::memory_order_acquire);
     for(unsigned i=0;i<128;++i) wave[i]=processor.scope[(head+i)%128].load(std::memory_order_relaxed);
-    capture.setButtonText(capture.getToggleState()?"RELEASE":"CAPTURE");
     const auto r=processor.presetRevision.load();
     if(r!=revision) { revision=r; presets.setSelectedId(0,juce::dontSendNotification); presets.setText(processor.presetName(),juce::dontSendNotification); }
-    if(isShowing()) repaint();
+    // Only audio visualisation, meters and preset metadata need polling. Knobs/readouts
+    // repaint through JUCE SliderAttachment, including when this timer is not running.
+    auto invalidate=[this](juce::Rectangle<int> logical) {
+        repaint(getLocalArea(&surface,logical));
+    };
+    if(!details) invalidate({28,98,944,254});
+    invalidate({28,679,944,21});
+    flushNativeRepaints(*this);
 }
 void FrostbiteAudioProcessorEditor::choosePreset(bool saving) {
     const auto folder=processor.presetDirectory();

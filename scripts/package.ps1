@@ -1,9 +1,9 @@
 [CmdletBinding()]
-param()
+param([ValidatePattern('^FROSTBITE-[A-Za-z0-9.-]+$')][string]$Name='FROSTBITE-1.0.0-Windows-x64')
 $ErrorActionPreference='Stop'
 $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $release=Join-Path $root 'build\Frostbite_artefacts\Release'
-$destination=Join-Path $root 'dist\FROSTBITE-1.0.0-Windows-x64'
+$destination=Join-Path $root ('dist\'+$Name)
 $bundle=Join-Path $release 'VST3\FROSTBITE.vst3'
 if(!(Test-Path -LiteralPath (Join-Path $bundle 'Contents\x86_64-win\FROSTBITE.vst3'))) { throw 'Build Release first.' }
 if(Test-Path -LiteralPath $destination) { throw 'Package directory already exists. Preserve or rename it before packaging again.' }
@@ -15,9 +15,12 @@ foreach($file in @('readme.md','THIRD_PARTY_NOTICES.md','docs','scripts','Source
     Copy-Item -LiteralPath (Join-Path $root $file) -Destination $destination -Recurse
 }
 New-Item -ItemType Directory -Path (Join-Path $destination 'validation') | Out-Null
-foreach($evidence in @('final-validation.log','render-metrics.txt','host-results.txt')) {
+foreach($evidence in @('final-validation.log','render-metrics.txt','host-results.txt','ui-results.txt','installer-results.txt','install-results.txt','studio-one-frostbite-scan.txt','studio-one-postinstall-scan.txt','dsp-render-comparison.txt')) {
     Copy-Item -LiteralPath (Join-Path $root ('build\'+$evidence)) -Destination (Join-Path $destination 'validation')
 }
+Copy-Item -LiteralPath (Join-Path $root 'build\Testing\Temporary\LastTest.log') -Destination (Join-Path $destination 'validation\ctest-results.txt')
+Copy-Item -LiteralPath (Join-Path $root 'build\qa\ui') -Destination (Join-Path $destination 'validation\ui') -Recurse
+Copy-Item -LiteralPath (Join-Path $root 'build\qa\studio-one') -Destination (Join-Path $destination 'validation\studio-one') -Recurse
 Copy-Item -LiteralPath (Join-Path $root 'build\qa\Factory Presets') -Destination $destination -Recurse
 if(Test-Path -LiteralPath (Join-Path $root 'renders')) {
     Copy-Item -LiteralPath (Join-Path $root 'renders') -Destination $destination -Recurse

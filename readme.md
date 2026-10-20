@@ -74,4 +74,4 @@ See [audition guide](docs/AUDITION.md), [DSP design](docs/ENGINEERING.md) and [S
 - macOS builds are unverified. The DSP is portable; on a Mac install Xcode/CMake, configure with Ninja or Xcode, and add `AU` to `FORMATS`. Build/test separately for `arm64;x86_64`, then handle signing, notarization and packaging. No macOS compatibility is claimed.
 - Review [dependency licensing](THIRD_PARTY_NOTICES.md) before distribution.
 
-The factual build/test status is recorded in [completion report](docs/COMPLETION.md).
+The factual build/test status is recorded in [completion report](docs/COMPLETION.md). The subsequent [UI feedback repair report](docs/UI_REPAIR.md) includes control regression evidence and the pending Studio One acceptance checks. Installer backups are preserved outside VST3 scan folders so previous builds cannot be rediscovered as duplicate plugins.

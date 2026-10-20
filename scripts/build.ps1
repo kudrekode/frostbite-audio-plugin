@@ -22,8 +22,10 @@ try {
     & $ctestExe --test-dir build -C $Configuration --output-on-failure
     if($LASTEXITCODE) { throw 'Automated tests failed.' }
     $bundle=Join-Path $projectRoot "build\Frostbite_artefacts\$Configuration\VST3\FROSTBITE.vst3"
-    & ".\build\frostbite_host_check_artefacts\$Configuration\frostbite_host_check.exe" $bundle
+    & ".\build\frostbite_host_check_artefacts\$Configuration\frostbite_host_check.exe" $bundle |
+        Tee-Object -FilePath 'build\host-results.txt'
     if($LASTEXITCODE) { throw 'VST3 host check failed.' }
+    & (Join-Path $projectRoot 'Tests\InstallerTests.ps1') 6>&1 | Tee-Object -FilePath 'build\installer-results.txt'
     if(!$SkipRenders) {
         & ".\build\frostbite_render_artefacts\$Configuration\frostbite_render.exe" --diagnostics (Join-Path $projectRoot 'renders') |
             Tee-Object -FilePath 'build\render-metrics.txt'

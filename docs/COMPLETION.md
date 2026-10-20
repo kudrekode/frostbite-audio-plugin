@@ -2,6 +2,8 @@
 
 Build and verification date: **20 October 2026**. Target: Windows x64.
 
+For the subsequent UI feedback changes, three-suite CTest run, installation backup repair and remaining Studio One verification, see [UI repair report](UI_REPAIR.md). The build details below describe the original release validation.
+
 ## Delivered
 
 - Genuine x64 VST3 audio effect and native JUCE standalone.

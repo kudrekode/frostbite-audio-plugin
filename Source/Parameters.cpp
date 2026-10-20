@@ -36,7 +36,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout() {
             auto attributes=juce::AudioParameterFloatAttributes().withLabel(p.unit)
                 .withStringFromValueFunction([i](float v,int) {
                     if(juce::String(parameterInfo[i].unit)=="%") return juce::String(v*100,1)+" %";
-                    return juce::String(v,(parameterInfo[i].step<1?1:0))+" "+parameterInfo[i].unit;
+                    // Preserve the parameter's precision (Motion Rate has a 0.01 Hz step).
+                    const auto step=parameterInfo[i].step;
+                    const int decimals=step<.1f?2:step<1?1:0;
+                    return juce::String(v,decimals)+" "+parameterInfo[i].unit;
                 })
                 .withValueFromStringFunction([i](const juce::String& text) {
                     const float value=text.getFloatValue();

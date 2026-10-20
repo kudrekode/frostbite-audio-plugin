@@ -19,6 +19,7 @@ public:
     void paint(juce::Graphics&) override;
     juce::Slider slider;
 private:
+    void focusOfChildComponentChanged(FocusChangeType) override;
     size_t index;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
 };
@@ -29,6 +30,7 @@ public:
     ~FrostbiteAudioProcessorEditor() override;
     void paint(juce::Graphics&) override;
     void resized() override;
+    void parentHierarchyChanged() override;
 private:
     FrostbiteAudioProcessor& processor;
     FrostLookAndFeel look;
