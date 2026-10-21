@@ -63,7 +63,7 @@ struct Mapped {
     float freezeLevel=0, grainMs=180, drift=.2f;
     float damageDrive=1, damageTone=6000, damageBlend=0, broken=0;
     float echoMs=400, feedback=.4f, echoTone=5000, width=1, echoLevel=0;
-    float size=.5f, decay=6, damping=4000, diffusion=.7f, reverbMod=.2f, predelay=20, reverbLevel=0;
+    float size=.5f, decay=6, damping=4000, diffusion=.7f, reverbMod=.2f, predelay=20, reverbLevel=0, reverbLevelTrim=1;
     float distance=0, motionDepth=0, motionRate=.15f, mix=.5f, output=1, input=1;
 };
 double divisionBeats(int index);
@@ -168,12 +168,22 @@ private:
     std::array<Allpass,2> scatter;
 };
 
+// Offline diagnostics retain the actual signal path, without adding work to the
+// production process specialization. Callers own and preallocate these frames.
+enum TraceStage : size_t {
+    Dry, InputGain, Frozen, DamageOut, EchoReturn, LayerBeforeMotion,
+    LayerAfterMotion, ReverbReturn, WetBeforeDistance, WetAfterDistance,
+    WetAfterDC, Mixed, Protected, Final, TraceCount
+};
+struct TraceFrame { std::array<Stereo, TraceCount> stages{}; };
+
 class Engine {
 public:
     void prepare(double sampleRate, int maximumBlockSize);
     void reset();
     void setParameters(const Values&, double bpm=120);
     void process(float* left, float* right, int samples) noexcept;
+    void processOffline(float* left, float* right, int samples, TraceFrame* frames) noexcept;
     bool hasCapture() const { return freeze.hasCapture(); }
     float inputPeak() const { return inPeak; }
     float outputPeak() const { return outPeak; }
@@ -192,5 +202,6 @@ private:
     unsigned controlCounter=0;
     bool prepared=false, firstBlock=true;
     void configure();
+    template<bool trace> void processImpl(float*, float*, int, TraceFrame*) noexcept;
 };
 } // namespace frostbite

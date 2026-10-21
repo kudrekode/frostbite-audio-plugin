@@ -7,7 +7,9 @@
 static bool writeWav(const juce::File& path,const juce::AudioBuffer<float>& audio,double rate) {
     path.getParentDirectory().createDirectory();
     auto fileStream=path.createOutputStream();
-    if(!fileStream || !fileStream->setPosition(0) || fileStream->truncate().failed()) return false;
+    if(!fileStream || !fileStream->setPosition(0) || fileStream->truncate().failed()) {
+        std::cerr<<"Cannot open/truncate output WAV: "<<path.getFullPathName()<<"\n";return false;
+    }
     std::unique_ptr<juce::OutputStream> stream=std::move(fileStream);
     juce::WavAudioFormat wav;
     auto writer=wav.createWriterFor(stream,juce::AudioFormatWriterOptions{}
@@ -37,8 +39,10 @@ static juce::AudioBuffer<float> render(FrostbiteAudioProcessor& p,const juce::Au
         <<",last_above_-60dB_s="<<double(last)/sr<<",render_seconds="<<seconds<<",cpu_realtime_percent="<<100*seconds/(total/sr)<<"\n";
     return output;
 }
+#include "Audit.h"
 int main(int argc,char** argv) {
     juce::ScopedJuceInitialiser_GUI juce;
+    if(argc>=3 && juce::String(argv[1])=="--audit") return audit::execute(juce::File(argv[2]));
     if(argc>=2 && juce::String(argv[1])=="--audition") {
         AuditionWindow window;
         if(argc>=3) static_cast<AuditionPanel*>(window.getContentComponent())->loadFile(juce::File(argv[2]));
@@ -75,7 +79,7 @@ int main(int argc,char** argv) {
         }
         return 0;
     }
-    if(argc<3) {std::cout<<"Usage: frostbite_render input.wav output.wav [preset 0..7] [tail seconds]\n       frostbite_render --diagnostics [output directory]\n";return 0;}
+    if(argc<3) {std::cout<<"Usage: frostbite_render input.wav output.wav [preset 0..7] [tail seconds]\n       frostbite_render --diagnostics [output directory]\n       frostbite_render --audit output_directory\n";return 0;}
     juce::AudioFormatManager formats;formats.registerBasicFormats();
     auto reader=std::unique_ptr<juce::AudioFormatReader>(formats.createReaderFor(juce::File(argv[1])));
     if(!reader || reader->lengthInSamples>reader->sampleRate*600) {std::cerr<<"Cannot read input (maximum 10 minutes).\n";return 1;}

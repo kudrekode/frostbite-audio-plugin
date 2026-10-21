@@ -183,6 +183,31 @@ int main() {
         for(size_t n=0;n<length;) {const size_t count=std::min(size_t(17+n%983),length-n);b.process(bl.data()+n,br.data()+n,int(count));n+=count;}
         for(size_t n=0;n<length;++n) require(std::abs(al[n]-bl[n])<1e-7f && std::abs(ar[n]-br[n])<1e-7f,"block boundary dependence");
     });
+    test("Offline stage trace is sample-identical to production processing",[] {
+        Engine realtime,offline; realtime.prepare(48000,257); offline.prepare(48000,257);
+        std::array<float,257> l{},r{},ol{},orr{};
+        std::array<TraceFrame,257> frames{};
+        auto p=defaults();
+        for(int block=0;block<200;++block) {
+            p[Capture]=block>=80 && block<140?1.0f:0.0f;
+            p[Damage]=float(block%40)/39.0f;
+            p[Abyss]=float(block%50)/49.0f;
+            realtime.setParameters(p); offline.setParameters(p);
+            const int count=1+block%257;
+            for(int n=0;n<count;++n) {
+                l[size_t(n)]=ol[size_t(n)]=.17f*std::sin(float(block*257+n)*.071f);
+                r[size_t(n)]=orr[size_t(n)]=.13f*std::cos(float(block*257+n)*.033f);
+            }
+            realtime.process(l.data(),r.data(),count);
+            offline.processOffline(ol.data(),orr.data(),count,frames.data());
+            for(int n=0;n<count;++n) {
+                const auto i=size_t(n);
+                require(l[i]==ol[i] && r[i]==orr[i],"trace changed production samples");
+                require(frames[i].stages[Final].l==ol[i] && frames[i].stages[Final].r==orr[i],"trace missed output");
+                for(const auto stage:frames[i].stages) require(good(stage),"invalid stage snapshot");
+            }
+        }
+    });
     test("Mix zero / bypass are exact, echo/reverb level zero contribute nothing",[] {
         Engine a,b; a.prepare(48000,128); b.prepare(48000,128);
         auto p=defaults(); p[Mix]=0; p[Output]=0; a.setParameters(p); p[Mix]=1; p[Bypass]=1;b.setParameters(p);
@@ -192,6 +217,119 @@ int main() {
         for(size_t n=0;n<128;++n) require(l[n]==.3f*std::sin(float(n)*.07f) && lb[n]==l[n],"dry/bypass mismatch");
         p=defaults();p[EchoLevel]=p[ReverbLevel]=0;
         auto m=mapParameters(p,120);require(m.echoLevel==0 && m.reverbLevel==0,"zero levels not respected");
+    });
+    test("Dry output automation reaches unity smoothly",[] {
+        for(double sr:{44100.0,48000.0,96000.0}) {
+            Engine e; e.prepare(sr,256); auto p=defaults();
+            p[Mix]=0; p[Output]=-24; e.setParameters(p);
+            std::array<float,256> l{},r{}; l.fill(.25f); r.fill(-.125f);
+            e.process(l.data(),r.data(),256);
+            float previous=l.back(),maxStep=0;
+            p[Output]=0; e.setParameters(p);
+            for(int block=0;block<int(sr)/256;++block) {
+                l.fill(.25f); r.fill(-.125f); e.process(l.data(),r.data(),256);
+                for(const auto x:l) { maxStep=std::max(maxStep,std::abs(x-previous)); previous=x; }
+            }
+            require(maxStep<.005f,"unity shortcut bypassed output smoothing");
+            require(l.back()==.25f && r.back()==-.125f,"unity did not settle exactly");
+        }
+    });
+    test("Reverb fine level zero mutes the returned tail with Distance active",[] {
+        Engine e; e.prepare(48000,128); auto p=defaults();
+        p[Distance]=.8f; p[ReverbLevel]=0; p[Abyss]=1; p[Echo]=0; p[Motion]=0;
+        p[Damage]=0; p[Freeze]=0; p[Mix]=1; p[Output]=0; e.setParameters(p);
+        std::array<float,128> l{},r{};
+        std::array<TraceFrame,128> frames{};
+        double internalTail=0,leakedTail=0;
+        for(int block=0;block<375;++block) {
+            l.fill(0); r.fill(0); if(block==0) l[0]=r[0]=.5f;
+            e.processOffline(l.data(),r.data(),128,frames.data());
+            for(const auto& f:frames) {
+                internalTail+=energy(f.stages[ReverbReturn]);
+                if(block>0) leakedTail+=energy(f.stages[WetBeforeDistance]);
+            }
+        }
+        require(internalTail>1e-5,"test failed to excite reverb");
+        require(leakedTail<1e-15,"Distance bypassed the reverb return level");
+    });
+    test("Linear Mix preserves midpoint for correlated, partial and frozen signals",[] {
+        for(int scenario:{0,1,2}) {
+            Engine wet,half; wet.prepare(48000,128); half.prepare(48000,128);
+            auto p=defaults(); p[Damage]=scenario==2?1.0f:0.0f; p[Drive]=scenario==2?30.0f:6.0f;
+            p[Freeze]=scenario==2?1.0f:0.0f; p[FreezeLevel]=6;
+            p[Echo]=scenario==1?.7f:0.0f;
+            p[Abyss]=scenario==1?1.0f:0.0f; p[Distance]=0; p[Motion]=0; p[Output]=0;
+            p[Mix]=1; wet.setParameters(p); p[Mix]=.5f; half.setParameters(p);
+            std::array<float,128> l{},r{},hl{},hr{},dryL{},dryR{};
+            double xy=0,xx=0,yy=0;
+            uint32_t random=8173;
+            for(int block=0;block<800;++block) {
+                if(scenario==2 && block==200) {
+                    p[Capture]=1; p[Mix]=1; wet.setParameters(p); p[Mix]=.5f; half.setParameters(p);
+                }
+                for(size_t n=0;n<l.size();++n) {
+                    const auto time=float(block*128+int(n));
+                    random=random*1664525u+1013904223u;
+                    const float noise=(float(random&65535)/32768.0f-1)*.03f;
+                    dryL[n]=l[n]=hl[n]=scenario==2?noise:.03f*std::sin(time*.071f);
+                    dryR[n]=r[n]=hr[n]=scenario==1?.02f*std::cos(time*.103f):dryL[n];
+                }
+                wet.process(l.data(),r.data(),128); half.process(hl.data(),hr.data(),128);
+                for(size_t n=0;n<l.size();++n) {
+                    require(std::abs(hl[n]-.5f*(dryL[n]+l[n]))<1e-7f
+                        && std::abs(hr[n]-.5f*(dryR[n]+r[n]))<1e-7f,"mix midpoint is not linear");
+                    if(block>400) { xy+=double(dryL[n])*l[n]; xx+=double(dryL[n])*dryL[n]; yy+=double(l[n])*l[n]; }
+                }
+            }
+            const double correlation=xy/std::sqrt(xx*yy);
+            if(scenario==0) require(correlation>.99,"correlated mix case not correlated");
+            if(scenario==2) require(std::abs(correlation)<.5,"frozen mix case insufficiently decorrelated");
+        }
+    });
+    test("Macro progression and documented endpoint ranges",[] {
+        auto p=defaults();
+        for(size_t macro=Freeze;macro<=Motion;++macro) {
+            Mapped prior{};
+            for(int step=0;step<=4;++step) {
+                p=defaults(); p[macro]=float(step)*.25f; const auto m=mapParameters(p,120);
+                if(step>0) {
+                    switch(macro) {
+                        case Freeze: require(m.freezeLevel>prior.freezeLevel,"Freeze dead zone"); break;
+                        case Damage: require(m.damageDrive>prior.damageDrive && m.damageBlend>prior.damageBlend
+                            && m.damageTone<prior.damageTone,"Damage progression"); break;
+                        case Distance: require(m.distance>prior.distance,"Distance progression"); break;
+                        case Echo: require(m.echoLevel>prior.echoLevel && m.feedback>prior.feedback
+                            && m.echoTone<prior.echoTone,"Echo progression"); break;
+                        case Abyss: require(m.reverbLevel>prior.reverbLevel && m.size>prior.size
+                            && m.decay>prior.decay && m.damping<prior.damping,"Abyss progression"); break;
+                        case Motion: require(m.motionDepth>prior.motionDepth && m.drift>prior.drift
+                            && m.reverbMod>prior.reverbMod,"Motion progression"); break;
+                        default: break;
+                    }
+                }
+                prior=m;
+            }
+        }
+        p=defaults(); p[Freeze]=p[Damage]=p[Echo]=p[Abyss]=p[Motion]=0;
+        auto m=mapParameters(p,120);
+        require(m.freezeLevel==0 && m.damageBlend==0 && m.echoLevel==0 && m.reverbLevel==0
+            && m.motionDepth==0,"macro zero return endpoints");
+        p[Freeze]=p[Damage]=p[Echo]=p[Abyss]=p[Motion]=1;
+        p[Drive]=30; p[Size]=1; p[Decay]=35; p[MotionDepth]=1; p[Feedback]=.94f;
+        m=mapParameters(p,120);
+        require(std::abs(20*std::log10(m.damageDrive)-54)<1e-4f && m.broken==1
+            && m.damageBlend==1,"Damage cannot reach documented maximum");
+        require(m.freezeLevel==1 && m.reverbLevel==1 && m.size==1 && m.decay==45
+            && m.motionDepth==1 && m.feedback==.94f,"maximum macro endpoints");
+        for(float level:{0.0f,.25f,.5f,.75f,1.0f}) {
+            p[Mix]=level; m=mapParameters(p,120); require(m.mix==level,"Mix normalized endpoint/progression");
+        }
+        float previous=0;
+        for(float db:{-24.0f,-16.5f,-9.0f,-1.5f,6.0f}) {
+            p[Output]=db; m=mapParameters(p,120);
+            require(m.output>previous && std::abs(20*std::log10(m.output)-db)<1e-4f,"Output gain calibration");
+            previous=m.output;
+        }
     });
     std::cout<<passed<<" passed, "<<failed<<" failed\n"; return failed?1:0;
 }

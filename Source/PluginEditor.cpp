@@ -30,6 +30,7 @@ FrostLookAndFeel::FrostLookAndFeel() {
     setColour(juce::PopupMenu::backgroundColourId,panel);
     setColour(juce::PopupMenu::textColourId,white);
     setColour(juce::PopupMenu::highlightedBackgroundColourId,juce::Colour(0xff26424e));
+    setColour(juce::PopupMenu::highlightedTextColourId,ice);
     setColour(juce::TooltipWindow::backgroundColourId,panel);
     setColour(juce::TooltipWindow::textColourId,white);
     setColour(juce::TooltipWindow::outlineColourId,steel);
@@ -44,7 +45,11 @@ void FrostLookAndFeel::drawRotarySlider(juce::Graphics& g,int x,int y,int width,
     track.addCentredArc(centre.x,centre.y,radius,radius,0,start,end,true);
     if(position>0) active.addCentredArc(centre.x,centre.y,radius,radius,0,start,angle,true);
     g.setColour(juce::Colour(0xff263641)); g.strokePath(track,juce::PathStrokeType(2));
-    g.setColour(accent.withAlpha(.10f)); g.strokePath(active,juce::PathStrokeType(8));
+    // A value-driven halo stays inside this slider's existing repaint region. No animation.
+    const float intensity=position*position;
+    const auto glow=s.getComponentID()=="damage"?juce::Colour(0xffe17b54):accent;
+    g.setColour(glow.withAlpha(.06f+.16f*intensity));
+    g.strokePath(active,juce::PathStrokeType(6+4*intensity));
     g.setColour(accent); g.strokePath(active,juce::PathStrokeType(3));
     for(int i=0;i<=20;++i) {
         const float a=start+(end-start)*float(i)/20;
@@ -74,11 +79,47 @@ void FrostLookAndFeel::drawButtonBackground(juce::Graphics& g,juce::Button& b,co
 void FrostLookAndFeel::drawButtonText(juce::Graphics& g,juce::TextButton& b,bool,bool) {
     text(g,b.getButtonText(),b.getLocalBounds().toFloat(),11,b.getToggleState()?ice:steel,juce::Justification::centred);
 }
-void FrostLookAndFeel::drawComboBox(juce::Graphics& g,int w,int h,bool,int,int,int,int,juce::ComboBox&) {
-    g.setColour(panel); g.fillRoundedRectangle(0,0,float(w),float(h),4);
-    g.setColour(steel.withAlpha(.3f)); g.drawRoundedRectangle(.5f,.5f,float(w-1),float(h-1),4,1);
+void FrostLookAndFeel::drawComboBox(juce::Graphics& g,int w,int h,bool down,int,int,int,int,juce::ComboBox& box) {
+    const bool focused=box.hasKeyboardFocus(true);
+    g.setColour(down?juce::Colour(0xff26424e):panel); g.fillRoundedRectangle(0,0,float(w),float(h),4);
+    g.setColour(focused?ice:steel.withAlpha(.3f)); g.drawRoundedRectangle(.5f,.5f,float(w-1),float(h-1),4,focused?1.5f:1.0f);
     juce::Path p; p.startNewSubPath(float(w-20),float(h/2-2)); p.lineTo(float(w-15),float(h/2+3)); p.lineTo(float(w-10),float(h/2-2));
     g.setColour(steel); g.strokePath(p,juce::PathStrokeType(1));
+}
+void FrostLookAndFeel::drawPopupMenuItem(juce::Graphics& g,const juce::Rectangle<int>& area,
+    bool separator,bool enabled,bool highlighted,bool ticked,bool submenu,const juce::String& label,
+    const juce::String& shortcut,const juce::Drawable* icon,const juce::Colour* colour) {
+    if(!separator && enabled && ticked && !highlighted) {
+        g.setColour(ice.withAlpha(.07f)); g.fillRoundedRectangle(area.toFloat().reduced(1),3);
+    }
+    // Keep JUCE's tick, icon, submenu and accessibility conventions; explicitly style every row.
+    juce::LookAndFeel_V4::drawPopupMenuItem(g,area,separator,enabled,highlighted,ticked,submenu,label,shortcut,icon,colour);
+    if(!separator && enabled && highlighted) {
+        g.setColour(ice); g.fillRect(area.getX()+1,area.getY()+4,2,juce::jmax(0,area.getHeight()-8));
+    }
+}
+juce::Font FrostLookAndFeel::getPopupMenuFont() { return font(14); }
+juce::PopupMenu::Options FrostLookAndFeel::getOptionsForComboBoxPopupMenu(juce::ComboBox& box,juce::Label& label) {
+    return juce::LookAndFeel_V4::getOptionsForComboBoxPopupMenu(box,label).withStandardItemHeight(32);
+}
+void FrostLookAndFeel::preparePopupMenuWindow(juce::Component& window) {
+   #if JUCE_WINDOWS
+    // Popups have separate native peers, so the editor's paint workaround does not reach them.
+    if(auto* peer=window.getPeer()) {
+        const auto software=peer->getAvailableRenderingEngines().indexOf("Software Renderer");
+        if(software>=0) peer->setCurrentRenderingEngine(software);
+    }
+    popupWindows.emplace_back(&window);
+    startTimerHz(60);
+   #else
+    juce::ignoreUnused(window);
+   #endif
+}
+void FrostLookAndFeel::timerCallback() {
+    std::erase_if(popupWindows,[](const auto& window) { return window==nullptr; });
+    // Only service JUCE's existing dirty menu rows. JUCE retains mouse/keyboard tracking.
+    for(auto& window:popupWindows) flushNativeRepaints(*window);
+    if(popupWindows.empty()) stopTimer();
 }
 juce::Font FrostLookAndFeel::getComboBoxFont(juce::ComboBox&) { return font(13); }
 juce::Font FrostLookAndFeel::getLabelFont(juce::Label&) { return font(12); }
@@ -143,6 +184,8 @@ FrostbiteAudioProcessorEditor::FrostbiteAudioProcessorEditor(FrostbiteAudioProce
     bypassAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.state,"bypass",bypass);
     syncAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.state,"echo_sync",sync);
     for(int i=0;i<8;++i) presets.addItem(p.getProgramName(i),i+1);
+    presets.setTitle("Factory presets"); presets.setComponentID("factory_presets");
+    presets.setWantsKeyboardFocus(true);
     presets.setText(p.presetName(),juce::dontSendNotification);
     presets.onChange=[this] { if(presets.getSelectedId()>0) processor.setCurrentProgram(presets.getSelectedId()-1); };
     presets.setTooltip("Factory presets store settings. Play and capture your own source audio.");
@@ -168,7 +211,9 @@ FrostbiteAudioProcessorEditor::FrostbiteAudioProcessorEditor(FrostbiteAudioProce
     getConstrainer()->setFixedAspectRatio(1000.0/700.0);
     setSize(1000,700); startTimerHz(24);
 }
-FrostbiteAudioProcessorEditor::~FrostbiteAudioProcessorEditor() { stopTimer(); setLookAndFeel(nullptr); }
+FrostbiteAudioProcessorEditor::~FrostbiteAudioProcessorEditor() {
+    stopTimer(); presets.hidePopup(); division.hidePopup(); character.hidePopup(); setLookAndFeel(nullptr);
+}
 void FrostbiteAudioProcessorEditor::parentHierarchyChanged() {
    #if JUCE_WINDOWS
     // Studio One can present a stale Direct2D surface while slider/host values keep
@@ -272,7 +317,7 @@ void FrostbiteAudioProcessorEditor::timerCallback() {
     const auto head=processor.scopeHead.load(std::memory_order_acquire);
     for(unsigned i=0;i<128;++i) wave[i]=processor.scope[(head+i)%128].load(std::memory_order_relaxed);
     const auto r=processor.presetRevision.load();
-    if(r!=revision) { revision=r; presets.setSelectedId(0,juce::dontSendNotification); presets.setText(processor.presetName(),juce::dontSendNotification); }
+    if(r!=revision) { revision=r; presets.setText(processor.presetName(),juce::dontSendNotification); }
     // Only audio visualisation, meters and preset metadata need polling. Knobs/readouts
     // repaint through JUCE SliderAttachment, including when this timer is not running.
     auto invalidate=[this](juce::Rectangle<int> logical) {

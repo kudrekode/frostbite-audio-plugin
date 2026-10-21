@@ -74,6 +74,7 @@ Mapped mapParameters(const Values& p,double bpm) {
     m.reverbMod=std::min(1.0f,p[ReverbMod]+.35f*p[Motion]);
     m.predelay=p[Predelay];
     m.reverbLevel=p[ReverbLevel]*std::pow(p[Abyss],.8f);
+    m.reverbLevelTrim=p[ReverbLevel];
     m.distance=p[Distance]; m.motionDepth=p[MotionDepth]*p[Motion];
     m.motionRate=p[MotionRate]; m.mix=p[Mix];
     m.output=dbGain(p[Output]); m.input=dbGain(p[Input]);
@@ -308,28 +309,47 @@ void Engine::configure() {
     distance.configure(mapped.distance); motion.configure(mapped.motionDepth,mapped.motionRate);
 }
 void Engine::process(float* left,float* right,int samples) noexcept {
+    processImpl<false>(left,right,samples,nullptr);
+}
+void Engine::processOffline(float* left,float* right,int samples,TraceFrame* frames) noexcept {
+    if(frames==nullptr) { process(left,right,samples); return; }
+    processImpl<true>(left,right,samples,frames);
+}
+template<bool trace>
+void Engine::processImpl(float* left,float* right,int samples,TraceFrame* frames) noexcept {
     if(!prepared || left==nullptr || right==nullptr) return;
     if(firstBlock) { smooth=target; bypassFade=target[Bypass]; configure(); firstBlock=false; }
     inPeak=outPeak=0;
     for(int i=0;i<samples;++i) {
         Stereo dry{finite(left[i]),finite(right[i])};
+        if constexpr(trace) frames[i].stages[Dry]=dry;
         inPeak=std::max(inPeak,std::max(std::abs(dry.l),std::abs(dry.r)));
         for(size_t p=0;p<Count;++p) smooth[p]+=smoothing*(target[p]-smooth[p]);
         // Switches and note division are discrete, all continuous values are smoothed.
         smooth[EchoSync]=target[EchoSync]; smooth[EchoDivision]=target[EchoDivision];
         if((controlCounter++ & 31u)==0) configure();
         Stereo source=dry*mapped.input;
+        if constexpr(trace) frames[i].stages[InputGain]=source;
         Stereo ice=freeze.process(source,target[Capture]>.5f)*mapped.freezeLevel;
+        if constexpr(trace) frames[i].stages[Frozen]=ice;
         Stereo coloured=damage.process(source);
+        if constexpr(trace) frames[i].stages[DamageOut]=coloured;
         Stereo repeats=echo.process(coloured);
+        if constexpr(trace) frames[i].stages[EchoReturn]=repeats;
         Stereo layer=coloured*.82f+ice*.80f+repeats*mapped.echoLevel;
+        if constexpr(trace) frames[i].stages[LayerBeforeMotion]=layer;
         layer=motion.process(layer);
+        if constexpr(trace) frames[i].stages[LayerAfterMotion]=layer;
         Stereo tail=reverb.process(layer);
+        if constexpr(trace) frames[i].stages[ReverbReturn]=tail;
         // Distance changes the direct/diffuse ratio as well as the bandwidth.
         Stereo wet=layer*(1-.38f*mapped.reverbLevel-.22f*mapped.distance)
-            +tail*(mapped.reverbLevel*(.8f+.35f*mapped.distance)+.22f*mapped.distance);
+            +tail*(mapped.reverbLevel*(.8f+.35f*mapped.distance)+.22f*mapped.distance*mapped.reverbLevelTrim);
+        if constexpr(trace) frames[i].stages[WetBeforeDistance]=wet;
         wet=distance.process(wet);
+        if constexpr(trace) frames[i].stages[WetAfterDistance]=wet;
         wet={dc[0].process(wet.l),dc[1].process(wet.r)};
+        if constexpr(trace) frames[i].stages[WetAfterDC]=wet;
         auto protect=[](float x) {
             x=finite(x);
             const float a=std::abs(x);
@@ -337,12 +357,15 @@ void Engine::process(float* left,float* right,int samples) noexcept {
         };
         // Correlated linear mix, with exact original samples at Mix=0.
         Stereo out=blend(dry,wet,mapped.mix)*mapped.output;
+        if constexpr(trace) frames[i].stages[Mixed]=out;
         out={protect(out.l),protect(out.r)};
-        if(target[Mix]==0 && smooth[Mix]<1e-5f && target[Output]==0) out=dry;
+        if constexpr(trace) frames[i].stages[Protected]=out;
+        if(target[Mix]==0 && smooth[Mix]<1e-5f && target[Output]==0 && std::abs(smooth[Output])<1e-5f) out=dry;
         bypassFade+=smoothing*(target[Bypass]-bypassFade);
         if(target[Bypass]>.5f && bypassFade>.9999f) out=dry;
         else out=blend(out,dry,bypassFade);
         left[i]=finite(out.l); right[i]=finite(out.r);
+        if constexpr(trace) frames[i].stages[Final]={left[i],right[i]};
         outPeak=std::max(outPeak,std::max(std::abs(left[i]),std::abs(right[i])));
     }
 }

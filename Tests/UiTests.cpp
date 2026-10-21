@@ -11,6 +11,7 @@ template<class T> T* find(juce::Component& c,const juce::String& title) {
     if(auto* item=dynamic_cast<T*>(&c)) {
         if constexpr(std::is_same_v<T,juce::Slider>) { if(item->getTitle()==title) return item; }
         else if constexpr(std::is_same_v<T,juce::TextButton>) { if(item->getButtonText()==title) return item; }
+        else if constexpr(std::is_same_v<T,juce::ComboBox>) { if(item->getTitle()==title) return item; }
     }
     for(auto* child:c.getChildren()) if(auto* item=find<T>(*child,title)) return item;
     return nullptr;
@@ -105,6 +106,67 @@ void click(juce::Component& editor,const char* name) {
 juce::MouseEvent mouse(juce::Slider& s,juce::Point<float> position,juce::Point<float> start,int clicks=1) {
     return {juce::Desktop::getInstance().getMainMouseSource(),position,juce::ModifierKeys::leftButtonModifier,
             1,0,0,0,0,&s,&s,juce::Time::getCurrentTime(),start,juce::Time::getCurrentTime(),clicks,true};
+}
+void testPresetPopup(FrostbiteAudioProcessor& p,juce::Component& editor,const juce::File& dir) {
+    auto* combo=find<juce::ComboBox>(editor,"Factory presets");
+    check(combo!=nullptr,"Missing preset selector");
+    p.setCurrentProgram(0); pump();
+    check(combo->getSelectedId()==1,"Factory preset selection lost during metadata update");
+    combo->grabKeyboardFocus();
+    check(combo->hasKeyboardFocus(true),"Preset selector cannot receive keyboard focus");
+    saveImage(snapshot(*combo),dir.getChildFile("preset-selector-focused.png"));
+    combo->showPopup();
+    juce::Component::SafePointer<juce::Component> menu(juce::Component::getCurrentlyModalComponent());
+    check(menu!=nullptr && menu->getName()=="menu","Actual preset popup was not created");
+    check(&menu->getLookAndFeel()==&combo->getLookAndFeel(),"Popup lost FROSTBITE LookAndFeel");
+    auto* peer=menu->getPeer();
+    check(peer!=nullptr,"Actual popup has no native peer");
+   #if JUCE_WINDOWS
+    check(peer->getAvailableRenderingEngines()[peer->getCurrentRenderingEngine()]=="Software Renderer",
+          "Popup must use the same reliable software renderer as the editor");
+   #endif
+    check(menu->getNumChildComponents()==8,"Factory menu must contain all eight individual rows");
+    const auto highlight=combo->getLookAndFeel().findColour(juce::PopupMenu::highlightedBackgroundColourId);
+    const auto highlightText=combo->getLookAndFeel().findColour(juce::PopupMenu::highlightedTextColourId);
+    check(highlightText.getPerceivedBrightness()>highlight.getPerceivedBrightness()+.45f,"Popup hover text lacks contrast");
+    auto highlighted=[&](const juce::Image& image,int row) {
+        const auto bounds=menu->getChildComponent(row)->getBounds();
+        return image.getPixelAt(bounds.getX()+6,bounds.getCentreY())==highlight;
+    };
+    // Exercise JUCE's real menu mouse handler. No OS cursor movement or fabricated row painting.
+    for(int row=0;row<8;++row) {
+        auto* item=menu->getChildComponent(row);
+        check(item->getHeight()>=30,"Preset menu row is too small to read");
+        const auto position=item->getBounds().getCentre().toFloat();
+        const juce::MouseEvent event(juce::Desktop::getInstance().getMainMouseSource(),position,{},
+            1,0,0,0,0,menu.getComponent(),menu.getComponent(),juce::Time::getCurrentTime(),position,juce::Time::getCurrentTime(),0,false);
+        menu->mouseMove(event);
+        const auto im=snapshot(*menu);
+        for(int candidate=0;candidate<8;++candidate)
+            check(highlighted(im,candidate)==(candidate==row),"Popup mouse tracking highlights the wrong preset row");
+        saveImage(im,dir.getChildFile("preset-popup-hover-"+juce::String(row+1)+".png"));
+    }
+    // Move up from the last hovered row. Mouse and keyboard must share the visible highlight.
+    check(menu->keyPressed(juce::KeyPress(juce::KeyPress::upKey)),"Popup does not accept keyboard navigation");
+    const auto keyed=snapshot(*menu);
+    check(highlighted(keyed,6) && !highlighted(keyed,7),"Keyboard highlight failed to move between rows");
+    saveImage(keyed,dir.getChildFile("preset-popup-keyboard.png"));
+    // Selected row retains a tick even when another row is hovered.
+    auto tickArea=menu->getChildComponent(0)->getBounds().withWidth(26).reduced(5);
+    int selectedPixels=0;
+    for(int y=tickArea.getY();y<tickArea.getBottom();++y) for(int x=tickArea.getX();x<tickArea.getRight();++x)
+        if(keyed.getPixelAt(x,y).getPerceivedBrightness()>.6f) ++selectedPixels;
+    check(selectedPixels>10,"Selected factory preset has no visible tick");
+    check(menu->keyPressed(juce::KeyPress(juce::KeyPress::returnKey)),"Popup cannot select with Return");
+    // JUCE closes the modal menu, then posts a separate ComboBox change notification.
+    // Native paints can consume one dispatch slice before both callbacks have run.
+    for(int attempt=0;attempt<10 && p.getCurrentProgram()!=6;++attempt) pump();
+    check(p.getCurrentProgram()==6 && combo->getSelectedId()==7,"Keyboard popup selection did not load the selected preset: program="
+          +juce::String(p.getCurrentProgram())+", selection="+juce::String(combo->getSelectedId()));
+    combo->showPopup();
+    menu=juce::Component::getCurrentlyModalComponent();
+    check(menu!=nullptr && menu->keyPressed(juce::KeyPress(juce::KeyPress::escapeKey)),"Popup cannot dismiss with Escape");
+    pump();
 }
 void testUi(const juce::File& dir) {
     FrostbiteAudioProcessor p;
@@ -232,6 +294,7 @@ void testUi(const juce::File& dir) {
             // The actual value callback must service native dirty regions by itself.
             check(paints.count>before,"Native control paint deferred after a synchronous value change");
         }
+        if(attach==0) testPresetPopup(p,*editor,dir);
         wrapper.setVisible(false);
         wrapper.removeFromDesktop();
     }
@@ -246,7 +309,7 @@ int main() {
         auto dir=juce::File::getCurrentWorkingDirectory().getChildFile("qa/ui");
         check(dir.createDirectory().wasOk(),"UI evidence directory");
         testUi(dir);
-        std::cout<<"PASS UI: 29 rotary controls, 3 buttons, 2 choices; off-thread host updates; rendered min/mid/max arcs, indicators and text; mouse drag, reset, numeric entry; eight presets, preset/state restore, reopen, pending attachment destruction, scaled snapshots; native peer recreation and immediate paints without timer dispatch\n";
+        std::cout<<"PASS UI: 29 rotary controls, 3 buttons, 2 choices; off-thread host updates; rendered min/mid/max arcs, indicators and text; mouse drag, reset, numeric entry; eight presets, preset/state restore, reopen, pending attachment destruction, scaled snapshots; native peer recreation and immediate paints without timer dispatch; actual popup per-row mouse hover, selected tick, keyboard focus/navigation/selection/dismissal\n";
         return 0;
     } catch(const std::exception& e) { std::cerr<<"FAIL UI "<<e.what()<<"\n"; return 1; }
 }

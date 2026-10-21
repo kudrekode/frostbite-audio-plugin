@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param([ValidateSet('Debug','Release')][string]$Configuration='Release',
-      [int]$Jobs=3, [switch]$SkipRenders)
+      [int]$Jobs=3, [switch]$SkipRenders, [string]$RenderDirectory='')
 $ErrorActionPreference='Stop'
 $projectRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $cmakeCommand=Get-Command cmake -ErrorAction SilentlyContinue
@@ -27,7 +27,9 @@ try {
     if($LASTEXITCODE) { throw 'VST3 host check failed.' }
     & (Join-Path $projectRoot 'Tests\InstallerTests.ps1') 6>&1 | Tee-Object -FilePath 'build\installer-results.txt'
     if(!$SkipRenders) {
-        & ".\build\frostbite_render_artefacts\$Configuration\frostbite_render.exe" --diagnostics (Join-Path $projectRoot 'renders') |
+        # A fresh destination preserves audio that may be open/locked in a DAW.
+        $diagnosticDirectory=if($RenderDirectory){[IO.Path]::GetFullPath($RenderDirectory)}else{Join-Path $projectRoot 'renders'}
+        & ".\build\frostbite_render_artefacts\$Configuration\frostbite_render.exe" --diagnostics $diagnosticDirectory |
             Tee-Object -FilePath 'build\render-metrics.txt'
         if($LASTEXITCODE) { throw 'Diagnostic render failed.' }
     }
