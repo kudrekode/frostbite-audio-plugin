@@ -28,7 +28,7 @@ try {
     & (Join-Path $projectRoot 'Tests\InstallerTests.ps1') 6>&1 | Tee-Object -FilePath 'build\installer-results.txt'
     if(!$SkipRenders) {
         # A fresh destination preserves audio that may be open/locked in a DAW.
-        $diagnosticDirectory=if($RenderDirectory){[IO.Path]::GetFullPath($RenderDirectory)}else{Join-Path $projectRoot 'renders'}
+        $diagnosticDirectory=if($RenderDirectory){[IO.Path]::GetFullPath($RenderDirectory)}else{Join-Path $projectRoot 'renders/v2/diagnostics'}
         & ".\build\frostbite_render_artefacts\$Configuration\frostbite_render.exe" --diagnostics $diagnosticDirectory |
             Tee-Object -FilePath 'build\render-metrics.txt'
         if($LASTEXITCODE) { throw 'Diagnostic render failed.' }

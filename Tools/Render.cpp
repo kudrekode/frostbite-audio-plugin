@@ -40,8 +40,12 @@ static juce::AudioBuffer<float> render(FrostbiteAudioProcessor& p,const juce::Au
     return output;
 }
 #include "Audit.h"
+#include "V2.h"
 int main(int argc,char** argv) {
     juce::ScopedJuceInitialiser_GUI juce;
+    if(argc>=3 && juce::String(argv[1])=="--v2") return v2::execute(juce::File(argv[2]));
+    if(argc>=3 && juce::String(argv[1])=="--benchmark") return v2::benchmark(juce::File(argv[2]));
+    if(argc>=3 && juce::String(argv[1])=="--audit-legacy") return audit::execute(juce::File(argv[2]),true);
     if(argc>=3 && juce::String(argv[1])=="--audit") return audit::execute(juce::File(argv[2]));
     if(argc>=2 && juce::String(argv[1])=="--audition") {
         AuditionWindow window;
@@ -54,7 +58,7 @@ int main(int argc,char** argv) {
         folder.createDirectory();
         constexpr double sr=48000;
         const char* names[]{"01-frozen-cello","02-ruined-piano","03-glacial-echo","04-industrial-fog","05-distant-cathedral"};
-        const int programs[]{0,7,1,3,2};
+        const int programs[]{8,15,9,11,10};
         for(int kind=0;kind<5;++kind) {
             juce::AudioBuffer<float> dry(2,int(sr*4));dry.clear();
             for(int n=0;n<dry.getNumSamples();++n) {
@@ -79,13 +83,13 @@ int main(int argc,char** argv) {
         }
         return 0;
     }
-    if(argc<3) {std::cout<<"Usage: frostbite_render input.wav output.wav [preset 0..7] [tail seconds]\n       frostbite_render --diagnostics [output directory]\n       frostbite_render --audit output_directory\n";return 0;}
+    if(argc<3) {std::cout<<"Usage: frostbite_render input.wav output.wav [preset 0..17; V2 8..17] [tail seconds]\n       frostbite_render --diagnostics [output directory]\n       frostbite_render --audit output_directory\n";return 0;}
     juce::AudioFormatManager formats;formats.registerBasicFormats();
     auto reader=std::unique_ptr<juce::AudioFormatReader>(formats.createReaderFor(juce::File(argv[1])));
     if(!reader || reader->lengthInSamples>reader->sampleRate*600) {std::cerr<<"Cannot read input (maximum 10 minutes).\n";return 1;}
     juce::AudioBuffer<float> dry(2,int(reader->lengthInSamples));reader->read(&dry,0,dry.getNumSamples(),0,true,true);
     if(reader->numChannels==1) dry.copyFrom(1,0,dry,0,0,dry.getNumSamples());
-    FrostbiteAudioProcessor p;p.setCurrentProgram(argc>=4?juce::jlimit(0,7,juce::String(argv[3]).getIntValue()):0);
+    FrostbiteAudioProcessor p;p.setCurrentProgram(argc>=4?juce::jlimit(0,p.getNumPrograms()-1,juce::String(argv[3]).getIntValue()):0);
     auto wet=render(p,dry,reader->sampleRate,false,argc>=5?juce::jlimit(0,120,juce::String(argv[4]).getIntValue()):15);
     return writeWav(juce::File(argv[2]),wet,reader->sampleRate)?0:1;
 }

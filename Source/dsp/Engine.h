@@ -54,12 +54,15 @@ enum Param : size_t {
     EchoMs, EchoSync, EchoDivision, Feedback, EchoTone, Width, EchoLevel,
     Size, Decay, Damping, Diffusion, ReverbMod, Predelay, ReverbLevel,
     Drive, Character, DamageTone, DamageBlend, MotionRate, MotionDepth, Input,
-    Count
+    Voicing, FreezeMode, FreezeRouting, Count
 };
 using Values=std::array<float, Count>;
+Values legacyDefaults();
 Values defaults();
 Values sanitise(Values);
 struct Mapped {
+    bool v2=false;
+    float freezeAmount=0, freezeRouting=0;
     float freezeLevel=0, grainMs=180, drift=.2f;
     float damageDrive=1, damageTone=6000, damageBlend=0, broken=0;
     float echoMs=400, feedback=.4f, echoTone=5000, width=1, echoLevel=0;
@@ -78,7 +81,11 @@ public:
     Stereo process(Stereo) noexcept;
 private:
     double sr=48000;
+    bool v2=false;
     float gain=1, compensation=1, amount=0, broken=0;
+    std::array<Lowpass,2> emphasis;
+    static double ruinShape(double);
+    static double ruinIntegral(double);
     std::array<float,2> previous{};
     std::array<Lowpass,2> tone;
     std::array<DCBlock,2> dc;
@@ -116,6 +123,7 @@ private:
     std::array<std::array<Allpass,4>,2> diffusers;
     std::array<DelayLine,2> pre;
     float diffusion=.7f, modDepth=0, preSamples=1, size=.5f;
+    bool v2=false;
     bool initial=true;
 };
 
@@ -123,7 +131,7 @@ class FreezeEngine {
 public:
     void prepare(double sampleRate);
     void reset();
-    void configure(float grainMilliseconds, float driftAmount);
+    void configure(float grainMilliseconds, float driftAmount,bool modern=false);
     Stereo process(Stereo, bool capture) noexcept;
     bool hasCapture() const { return frozenCount>8; }
     size_t capacity() const { return buffers[0][0].size(); }
@@ -134,13 +142,32 @@ private:
     std::array<Grain,4> grains;
     int rolling=0, frozen=1;
     size_t write=0, recorded=0, frozenStart=0, frozenCount=0;
-    bool held=false;
+    bool held=false,modern=false;
     float envelope=0, attack=0, release=0, grainMs=180, drift=.2f, transition=1;
     Stereo previous{}, transitionFrom{};
     uint32_t seed=0x1874ab23u;
     float random() noexcept;
     void spawn(Grain&, float age=0) noexcept;
     float read(int channel, double position) const noexcept;
+};
+
+// Four independently refreshed grains read only recent, real stereo input.
+class LiveTextureEngine {
+public:
+    void prepare(double);
+    void reset();
+    void configure(float ms,float drift) { grainMs=ms; wander=drift; }
+    Stereo process(Stereo) noexcept;
+private:
+    struct Grain { double position=0; float age=0,length=1,speed=1; };
+    std::array<std::vector<float>,2> data;
+    std::array<Grain,4> grains{};
+    size_t write=0;
+    double sr=48000;
+    float grainMs=180,wander=.2f;
+    uint32_t seed=0x4167ac23u;
+    bool started=false;
+    void spawn(Grain&,float age=0) noexcept;
 };
 
 class MotionEngine {
@@ -158,11 +185,12 @@ class DistanceEngine {
 public:
     void prepare(double sampleRate);
     void reset();
-    void configure(float amount);
+    void configure(float amount,bool modern=false);
     Stereo process(Stereo) noexcept;
 private:
     double sr=48000;
     float amount=0;
+    bool v2=false;
     std::array<Lowpass,2> tone;
     std::array<DCBlock,2> highpass;
     std::array<Allpass,2> scatter;
@@ -192,6 +220,10 @@ private:
     EchoEngine echo;
     ReverbEngine reverb;
     FreezeEngine freeze;
+    LiveTextureEngine liveTexture;
+    float holdBlend=0,textureActivity=0;
+    Stereo lastOutput{},voiceCorrection{};
+    bool lastVoicing=false;
     DistanceEngine distance;
     MotionEngine motion;
     std::array<DCBlock,2> dc;

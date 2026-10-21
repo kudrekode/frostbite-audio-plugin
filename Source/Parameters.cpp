@@ -19,7 +19,9 @@ const std::array<ParameterInfo,Count> parameterInfo {{
     {"drive","Extra drive","dB",0,30,.1f,1},{"character","Character","",0,1,1,1},
     {"damage_tone","Damage tone","Hz",600,16000,1,.45f},{"damage_blend","Damage blend","%",0,1,.001f,1},
     {"motion_rate","Motion rate","Hz",.03f,2,.01f,.5f},{"motion_depth","Motion depth","%",0,1,.001f,1},
-    {"input","Input","dB",-24,12,.1f,1}
+    {"input","Input","dB",-24,12,.1f,1},
+    {"voicing","Voicing","",0,1,1,1},{"freeze_mode","Freeze mode","",0,1,1,1},
+    {"freeze_routing","Frozen routing","",0,1,1,1}
 }};
 juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout() {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
@@ -30,6 +32,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout() {
             layout.add(std::make_unique<juce::AudioParameterBool>(id,p.name,d[i]>.5f));
         else if(i==EchoDivision)
             layout.add(std::make_unique<juce::AudioParameterChoice>(id,p.name,juce::StringArray{"1/16","1/8","1/8 T","1/4","1/8 D","1/4 T","1/2","1/4 D","1/1"},int(d[i])));
+        else if(i==Voicing || i==FreezeMode || i==FreezeRouting)
+            layout.add(std::make_unique<juce::AudioParameterChoice>(id,p.name,
+                i==Voicing?juce::StringArray{"Legacy","V2"}:i==FreezeMode?juce::StringArray{"Hold","Live Texture"}:juce::StringArray{"Clean","Damage + Echo"},int(d[i])));
         else if(i==Character)
             layout.add(std::make_unique<juce::AudioParameterChoice>(id,p.name,juce::StringArray{"Warm","Broken"},0));
         else {
@@ -51,11 +56,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout() {
     }
     return layout;
 }
-const std::array<FactoryPreset,8>& factoryPresets() {
+const std::array<FactoryPreset,18>& factoryPresets() {
     static const auto presets=[] {
-        std::array<FactoryPreset,8> p{};
+        std::array<FactoryPreset,18> p{};
         auto put=[&](int n,const char* name,const char* desc,std::initializer_list<std::pair<Param,double>> values) {
-            auto v=defaults(); for(auto [key,value]:values) v[key]=float(value);
+            auto v=legacyDefaults(); for(auto [key,value]:values) v[key]=float(value);
             p[size_t(n)]={name,desc,v};
         };
         put(0,"Frozen Cello","A suspended harmonic cloud. Play a note, then capture.",
@@ -74,6 +79,19 @@ const std::array<FactoryPreset,8>& factoryPresets() {
             {{Freeze,.96f},{Damage,.06f},{Distance,.45f},{Echo,.33f},{Abyss,.97f},{Motion,.36f},{Texture,350},{Drift,.26f},{Decay,32},{Damping,.66f},{Size,1},{Mix,.85f},{Output,-5}});
         put(7,"Ruined Piano","Rounded attacks, cracked harmonics and trailing dust.",
             {{Freeze,.48f},{Damage,.58f},{Distance,.45f},{Echo,.56f},{Abyss,.67f},{Motion,.27f},{Drive,10},{DamageTone,4900},{EchoDivision,4},{Feedback,.63f},{Decay,11},{Predelay,38},{Mix,.58f}});
+        auto modern=[&](int n,const char* name,const char* desc,std::initializer_list<std::pair<Param,double>> values) {
+            auto v=defaults(); for(auto [key,value]:values) v[key]=float(value); p[size_t(n)]={name,desc,v};
+        };
+        modern(8,"Frozen Cello II","A living harmonic cloud. Capture to suspend a moment.", {{Freeze,0.72},{Damage,0.18},{Distance,0.27},{Echo,0.26},{Abyss,0.65},{Motion,0.3},{Texture,280},{Drift,0.18},{Decay,15},{Mix,0.66},{FreezeRouting,0},{Output,-0.5}});
+        modern(9,"Glacial Echo II","Wide crystalline repeats dissolving into a bright hall.", {{Freeze,0.22},{Damage,0.08},{Distance,0.1},{Echo,0.86},{Abyss,0.48},{Motion,0.24},{EchoDivision,7},{Feedback,0.79},{EchoTone,8500},{Damping,0.24},{Width,1.3},{Mix,0.52},{Output,-0.5}});
+        modern(10,"Distant Cathedral II","An immense diffuse hall, with a clear first arrival.", {{Freeze,0.18},{Damage,0.04},{Distance,0.5},{Echo,0.14},{Abyss,0.96},{Motion,0.21},{Size,0.96},{Decay,24},{Predelay,65},{Damping,0.35},{Mix,0.72}});
+        modern(11,"Industrial Fog II","Ragged asymmetric harmonics inside a moving storm.", {{Freeze,0.38},{Damage,0.86},{Distance,0.22},{Echo,0.42},{Abyss,0.62},{Motion,0.4},{Character,1},{Drive,7},{DamageTone,10000},{Decay,14},{Mix,0.76},{Output,-1.5}});
+        modern(12,"Broken Transmission II","Fractured short grains and narrow unstable triplets.", {{Freeze,0.45},{Damage,0.72},{Distance,0.6},{Echo,0.8},{Abyss,0.22},{Motion,0.8},{Character,1},{Texture,48},{Drift,0.9},{EchoDivision,2},{Feedback,0.83},{EchoTone,3800},{Width,0.4},{MotionRate,0.71},{MotionDepth,0.7},{Mix,0.68}});
+        modern(13,"Black Ice II","Cold short grains and bright metallic depth.", {{Freeze,0.65},{Damage,0.37},{Distance,0.12},{Echo,0.36},{Abyss,0.65},{Motion,0.55},{Texture,64},{Drift,0.72},{Size,0.32},{Damping,0.12},{Decay,12},{DamageTone,13000},{Mix,0.68},{FreezeRouting,0},{Output,-1}});
+        modern(14,"Endless Winter II","Continuously refreshed long grains in an enormous horizon.", {{Freeze,0.9},{Damage,0.1},{Distance,0.3},{Echo,0.3},{Abyss,0.96},{Motion,0.45},{Texture,380},{Drift,0.34},{Decay,32},{Damping,0.48},{Size,1},{Mix,0.83},{FreezeRouting,0},{Output,-1.5}});
+        modern(15,"Ruined Piano II","Jagged attacks feeding dark, rhythmically spaced trails.", {{Freeze,0.28},{Damage,0.78},{Distance,0.3},{Echo,0.62},{Abyss,0.6},{Motion,0.28},{Drive,6},{DamageTone,8800},{EchoDivision,4},{Feedback,0.65},{Decay,13},{Predelay,40},{Mix,0.64},{Output,-1}});
+        modern(16,"Whiteout","A luminous live cloud. Capture for an enduring frozen environment.", {{Freeze,1},{Damage,0.16},{Distance,0.12},{Echo,0.48},{Abyss,1},{Motion,0.5},{Texture,400},{Drift,0.22},{Decay,35},{Size,1},{Damping,0.18},{Feedback,0.8},{Mix,0.9},{FreezeRouting,0},{Output,-3}});
+        modern(17,"Cataclysm","Controlled industrial destruction with a vast unstable wake.", {{Freeze,0.52},{Damage,1},{Distance,0.15},{Echo,0.68},{Abyss,0.78},{Motion,0.8},{Character,1},{Drive,16},{DamageTone,13000},{Texture,90},{Drift,0.8},{Feedback,0.87},{Decay,20},{MotionDepth,0.65},{Mix,0.9},{Output,-2}});
         return p;
     }();
     return presets;

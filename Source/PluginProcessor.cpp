@@ -55,26 +55,29 @@ void FrostbiteAudioProcessor::applyValues(const frostbite::Values& valuesToApply
     }
 }
 void FrostbiteAudioProcessor::setCurrentProgram(int index) {
-    if(index<0 || index>=8) return;
+    if(index<0 || index>=getNumPrograms()) return;
     const auto& p=frostbite::factoryPresets()[size_t(index)];
     applyValues(p.values); currentProgram.store(index);
     state.state.setProperty("presetName",p.name,nullptr);
     presetRevision.fetch_add(1);
 }
 const juce::String FrostbiteAudioProcessor::getProgramName(int i) {
-    return i>=0 && i<8?frostbite::factoryPresets()[size_t(i)].name:juce::String{};
+    return i>=0 && i<getNumPrograms()?frostbite::factoryPresets()[size_t(i)].name:juce::String{};
 }
 juce::String FrostbiteAudioProcessor::presetName() const { return state.state.getProperty("presetName","Init").toString(); }
 void FrostbiteAudioProcessor::getStateInformation(juce::MemoryBlock& dest) {
     auto tree=state.copyState();
-    tree.setProperty("schema",1,nullptr); tree.setProperty("program",currentProgram.load(),nullptr);
+    tree.setProperty("schema",2,nullptr); tree.setProperty("program",currentProgram.load(),nullptr);
     // State/presets contain settings, never recorded audio. Reopen unarmed.
     for(auto child:tree) if(child.getProperty("id").toString()=="capture") child.setProperty("value",0,nullptr);
     if(auto xml=tree.createXml()) copyXmlToBinary(*xml,dest);
 }
 bool FrostbiteAudioProcessor::restoreTree(juce::ValueTree tree) {
-    if(!tree.isValid() || !tree.hasType("FrostbiteState") || int(tree.getProperty("schema",1))!=1) return false;
-    auto v=frostbite::defaults();
+    if(!tree.isValid() || !tree.hasType("FrostbiteState")) return false;
+    const int schema=int(tree.getProperty("schema",1));
+    if(schema<1 || schema>2) return false;
+    // Absence of explicit voicing ALWAYS means historical defaults, even in schema 2.
+    auto v=frostbite::legacyDefaults();
     for(auto child:tree) {
         const auto id=child.getProperty("id").toString();
         for(size_t i=0;i<frostbite::Count;++i) if(id==frostbite::parameterInfo[i].id) v[i]=float(child.getProperty("value",v[i]));
@@ -82,7 +85,7 @@ bool FrostbiteAudioProcessor::restoreTree(juce::ValueTree tree) {
     v[frostbite::Capture]=0;
     applyValues(v);
     state.state.setProperty("presetName",tree.getProperty("presetName","User"),nullptr);
-    currentProgram.store(juce::jlimit(0,7,int(tree.getProperty("program",0))));
+    currentProgram.store(juce::jlimit(0,getNumPrograms()-1,int(tree.getProperty("program",0))));
     presetRevision.fetch_add(1);
     return true;
 }
@@ -94,7 +97,8 @@ juce::File FrostbiteAudioProcessor::presetDirectory() const {
     return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory).getChildFile("Frostbite/Presets");
 }
 juce::Result FrostbiteAudioProcessor::savePreset(const juce::File& file) {
-    auto tree=state.copyState(); tree.setProperty("schema",1,nullptr);
+    auto tree=state.copyState(); tree.setProperty("schema",2,nullptr);
+    tree.setProperty("program",currentProgram.load(),nullptr);
     tree.setProperty("presetName",file.getFileNameWithoutExtension(),nullptr);
     for(auto child:tree) if(child.getProperty("id").toString()=="capture") child.setProperty("value",0,nullptr);
     auto result=file.getParentDirectory().createDirectory(); if(result.failed()) return result;

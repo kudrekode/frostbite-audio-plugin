@@ -47,10 +47,10 @@ void FrostLookAndFeel::drawRotarySlider(juce::Graphics& g,int x,int y,int width,
     g.setColour(juce::Colour(0xff263641)); g.strokePath(track,juce::PathStrokeType(2));
     // A value-driven halo stays inside this slider's existing repaint region. No animation.
     const float intensity=position*position;
-    const auto glow=s.getComponentID()=="damage"?juce::Colour(0xffe17b54):accent;
-    g.setColour(glow.withAlpha(.06f+.16f*intensity));
+    const auto glow=s.getComponentID()=="damage"?amber.interpolatedWith(juce::Colour(0xffff6347),intensity):accent;
+    g.setColour(glow.withAlpha(.06f+.26f*intensity));
     g.strokePath(active,juce::PathStrokeType(6+4*intensity));
-    g.setColour(accent); g.strokePath(active,juce::PathStrokeType(3));
+    g.setColour(glow); g.strokePath(active,juce::PathStrokeType(3+intensity));
     for(int i=0;i<=20;++i) {
         const float a=start+(end-start)*float(i)/20;
         const auto p1=centre+juce::Point<float>(std::sin(a),-std::cos(a))*(radius+5);
@@ -163,7 +163,7 @@ FrostbiteAudioProcessorEditor::FrostbiteAudioProcessorEditor(FrostbiteAudioProce
     setOpaque(true);
     setLookAndFeel(&look); addAndMakeVisible(surface);
     for(size_t i=0;i<frostbite::Count;++i) {
-        if(i==frostbite::Capture || i==frostbite::Bypass || i==frostbite::EchoSync || i==frostbite::EchoDivision || i==frostbite::Character) continue;
+        if(i==frostbite::Capture || i==frostbite::Bypass || i==frostbite::EchoSync || i==frostbite::EchoDivision || i==frostbite::Character || i>=frostbite::Voicing) continue;
         knobs[i]=std::make_unique<FrostKnob>(p,i); surface.addAndMakeVisible(*knobs[i]);
     }
     for(auto* b:{&capture,&bypass,&advanced,&previous,&next,&save,&load,&init,&sync}) surface.addAndMakeVisible(b);
@@ -183,15 +183,16 @@ FrostbiteAudioProcessorEditor::FrostbiteAudioProcessorEditor(FrostbiteAudioProce
     captureAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.state,"capture",capture);
     bypassAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.state,"bypass",bypass);
     syncAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.state,"echo_sync",sync);
-    for(int i=0;i<8;++i) presets.addItem(p.getProgramName(i),i+1);
+    for(int i=0;i<p.getNumPrograms();++i) presets.addItem((i<8?"Legacy / ":"V2 / ")+p.getProgramName(i),i+1);
     presets.setTitle("Factory presets"); presets.setComponentID("factory_presets");
     presets.setWantsKeyboardFocus(true);
-    presets.setText(p.presetName(),juce::dontSendNotification);
+    if(p.presetName()==p.getProgramName(p.getCurrentProgram())) presets.setSelectedId(p.getCurrentProgram()+1,juce::dontSendNotification);
+    else presets.setText(p.presetName(),juce::dontSendNotification);
     presets.onChange=[this] { if(presets.getSelectedId()>0) processor.setCurrentProgram(presets.getSelectedId()-1); };
-    presets.setTooltip("Factory presets store settings. Play and capture your own source audio.");
+    presets.setTooltip("V2 presets create texture as you play. Legacy presets preserve the original sound.");
     surface.addAndMakeVisible(presets);
-    previous.onClick=[this]{processor.setCurrentProgram((processor.getCurrentProgram()+7)%8);};
-    next.onClick=[this]{processor.setCurrentProgram((processor.getCurrentProgram()+1)%8);};
+    previous.onClick=[this]{processor.setCurrentProgram((processor.getCurrentProgram()+processor.getNumPrograms()-1)%processor.getNumPrograms());};
+    next.onClick=[this]{processor.setCurrentProgram((processor.getCurrentProgram()+1)%processor.getNumPrograms());};
     save.onClick=[this]{choosePreset(true);}; load.onClick=[this]{choosePreset(false);};
     init.onClick=[this]{processor.restoreDefaults();};
     advanced.onClick=[this]{details=!details; advanced.setToggleState(details,juce::dontSendNotification); layoutSurface(); repaint(); flushNativeRepaints(*this);};
@@ -202,6 +203,19 @@ FrostbiteAudioProcessorEditor::FrostbiteAudioProcessorEditor(FrostbiteAudioProce
     }
     division.addItemList({"1/16","1/8","1/8 T","1/4","1/8 D","1/4 T","1/2","1/4 D","1/1"},1);
     character.addItemList({"WARM","BROKEN"},1);
+    voicing.addItemList({"LEGACY","V2"},1);
+    freezeMode.addItemList({"HOLD","LIVE TEXTURE"},1);
+    freezeRouting.addItemList({"CLEAN FROZEN","INTO DAMAGE + ECHO"},1);
+    division.setComponentID("echo_division"); character.setComponentID("character");
+    voicing.setComponentID("voicing"); freezeMode.setComponentID("freeze_mode"); freezeRouting.setComponentID("freeze_routing");
+    voicing.setTitle("Voicing"); freezeMode.setTitle("Freeze mode"); freezeRouting.setTitle("Frozen routing");
+    voicing.setTooltip("Legacy preserves old sessions. V2 uses the new sonic architecture. Settings stay in place when switching.");
+    freezeMode.setTooltip("Live Texture refreshes grains as you play. Capture overrides it with Hold; Release returns to Live Texture. Legacy always uses Hold.");
+    freezeRouting.setTooltip("In V2, route grains through Damage and Echo, or keep a clean frozen layer. No feedback into capture.");
+    for(auto* box:{&voicing,&freezeMode,&freezeRouting}) { surface.addAndMakeVisible(box); box->onChange=[this]{repaint();flushNativeRepaints(*this);}; }
+    voicingAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(p.state,"voicing",voicing);
+    freezeModeAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(p.state,"freeze_mode",freezeMode);
+    freezeRoutingAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(p.state,"freeze_routing",freezeRouting);
     surface.addAndMakeVisible(division); surface.addAndMakeVisible(character);
     divisionAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(p.state,"echo_division",division);
     characterAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(p.state,"character",character);
@@ -209,10 +223,11 @@ FrostbiteAudioProcessorEditor::FrostbiteAudioProcessorEditor(FrostbiteAudioProce
     character.onChange=[this] { flushNativeRepaints(*this); };
     setResizable(true,true); setResizeLimits(800,560,1600,1120);
     getConstrainer()->setFixedAspectRatio(1000.0/700.0);
+    freezeMode.setEnabled(p.values()[frostbite::Voicing]>.5f); freezeRouting.setEnabled(p.values()[frostbite::Voicing]>.5f);
     setSize(1000,700); startTimerHz(24);
 }
 FrostbiteAudioProcessorEditor::~FrostbiteAudioProcessorEditor() {
-    stopTimer(); presets.hidePopup(); division.hidePopup(); character.hidePopup(); setLookAndFeel(nullptr);
+    stopTimer(); presets.hidePopup(); division.hidePopup(); character.hidePopup(); voicing.hidePopup(); freezeMode.hidePopup(); freezeRouting.hidePopup(); setLookAndFeel(nullptr);
 }
 void FrostbiteAudioProcessorEditor::parentHierarchyChanged() {
    #if JUCE_WINDOWS
@@ -231,6 +246,9 @@ void FrostbiteAudioProcessorEditor::resized() {
 void FrostbiteAudioProcessorEditor::layoutSurface() {
     presets.setBounds(427,27,232,34); previous.setBounds(389,27,30,34); next.setBounds(667,27,30,34);
     save.setBounds(711,27,51,34); load.setBounds(770,27,51,34); init.setBounds(829,27,51,34); bypass.setBounds(893,27,79,34);
+    voicing.setBounds(270,28,105,31);
+    freezeMode.setBounds(795,157,154,31); freezeRouting.setBounds(755,202,194,31);
+    freezeMode.setVisible(!details || page==0); freezeRouting.setVisible(!details || page==0);
     capture.setBounds(795,108,154,38); advanced.setBounds(845,317,104,27);
     for(size_t i=0;i<frostbite::Count;++i) if(knobs[i]) knobs[i]->setVisible(i<=frostbite::Output);
     for(int i=0;i<6;++i) knobs[size_t(i)]->setBounds(29+i*158,378,152,148);
@@ -257,7 +275,7 @@ void FrostbiteAudioProcessorEditor::paint(juce::Graphics& g) {
     // Original crystalline mark, drawn entirely with vectors.
     juce::Path mark; mark.startNewSubPath(28,29); mark.lineTo(53,29); mark.lineTo(42,43); mark.lineTo(51,43); mark.lineTo(30,64); mark.lineTo(36,46); mark.lineTo(28,46); mark.closeSubPath();
     g.setColour(ice); g.fillPath(mark);
-    g.setFont(font(27,true)); g.setColour(white); g.drawText("F R O S T B I T E",66,24,294,34,juce::Justification::centredLeft);
+    g.setFont(font(22,true)); g.setColour(white); g.drawText("F R O S T B I T E",66,24,197,34,juce::Justification::centredLeft);
     text(g,bypass.getToggleState()?"BYPASSED / DRY SIGNAL":"ATMOSPHERIC AUDIO ENGINE",{68,58,260,16},9,
          bypass.getToggleState()?amber:steel);
     g.setColour(steel.withAlpha(.18f)); g.drawHorizontalLine(86,28,972);
@@ -267,9 +285,9 @@ void FrostbiteAudioProcessorEditor::paint(juce::Graphics& g) {
     g.setColour(steel.withAlpha(.2f)); g.drawRoundedRectangle(display,7,1);
     if(!details) {
         text(g,"01  /  CRYOGENIC MEMORY",{49,112,330,20},10,steel);
-        text(g,capture.getToggleState()?"A MOMENT, SUSPENDED.":"HOLD THE MOMENT.",{49,141,630,40},24,white);
+        text(g,capture.getToggleState()?"A MOMENT, SUSPENDED.":(processor.values()[frostbite::Voicing]>.5f && processor.values()[frostbite::FreezeMode]>.5f?"THE COLD IS ALIVE.":"HOLD THE MOMENT."),{49,141,630,40},24,white);
         text(g,capture.getToggleState()?(processor.captured.load()?"RECORDED AUDIO  /  GRANULAR HOLD":"NO AUDIO CAPTURED  /  RELEASE, PLAY, RECAPTURE"):
-             "Play something. Capture it. Let the world fall away.",{50,184,655,22},12,steel);
+             (processor.values()[frostbite::Voicing]>.5f && processor.values()[frostbite::FreezeMode]>.5f?"Play to grow a texture. Capture to hold it. Release to evolve.":"Play something. Capture it. Let the world fall away."),{50,184,655,22},12,steel);
         // The cloud envelope and every waveform point are driven by processed audio.
         const bool held=capture.getToggleState() && processor.captured.load();
         for(int layer=7;layer>=0;--layer) {
@@ -299,9 +317,9 @@ void FrostbiteAudioProcessorEditor::paint(juce::Graphics& g) {
     }
     text(g,"BEAUTIFUL  /  DESTROYED",{47,568,600,20},12,ice);
     text(g,"Frozen textures. Damaged echoes. Infinite distances.",{47,594,650,24},13,steel);
-    text(g,"IN   >   DAMAGE   >   FROZEN + ECHO   >   ABYSS   >   DISTANCE",{47,635,650,18},9,steel.withAlpha(.6f));
+    text(g,(processor.values()[frostbite::Voicing]>.5f && processor.values()[frostbite::FreezeRouting]>.5f?"IN + TEXTURE   >   DAMAGE   >   ECHO   >   ABYSS   >   DISTANCE":"IN   >   DAMAGE   >   FROZEN + ECHO   >   ABYSS   >   DISTANCE"),{47,635,650,18},9,steel.withAlpha(.6f));
     g.setColour(steel.withAlpha(.16f)); g.drawHorizontalLine(679,28,972);
-    text(g,"FROSTBITE AUDIO  /  1.0.0",{29,681,300,16},8,steel.withAlpha(.65f));
+    text(g,"FROSTBITE AUDIO  /  2.0.0",{29,681,300,16},8,steel.withAlpha(.65f));
     text(g,processor.presetName(),{357,681,360,16},9,steel,juce::Justification::centred);
     auto meter=[&](float x,float v,const char* label) {
         text(g,label,{x-25,682,23,14},8,steel);
@@ -312,12 +330,16 @@ void FrostbiteAudioProcessorEditor::paint(juce::Graphics& g) {
 }
 void FrostbiteAudioProcessorEditor::timerCallback() {
     if(!isShowing()) return;
+    const bool modern=processor.values()[frostbite::Voicing]>.5f;
+    freezeMode.setEnabled(modern); freezeRouting.setEnabled(modern);
     input=std::max(processor.inputMeter.load(std::memory_order_relaxed),input*.88f);
     output=std::max(processor.outputMeter.load(std::memory_order_relaxed),output*.88f);
     const auto head=processor.scopeHead.load(std::memory_order_acquire);
     for(unsigned i=0;i<128;++i) wave[i]=processor.scope[(head+i)%128].load(std::memory_order_relaxed);
     const auto r=processor.presetRevision.load();
-    if(r!=revision) { revision=r; presets.setText(processor.presetName(),juce::dontSendNotification); }
+    if(r!=revision) { revision=r;
+        if(processor.presetName()==processor.getProgramName(processor.getCurrentProgram())) presets.setSelectedId(processor.getCurrentProgram()+1,juce::dontSendNotification);
+        else presets.setText(processor.presetName(),juce::dontSendNotification); }
     // Only audio visualisation, meters and preset metadata need polling. Knobs/readouts
     // repaint through JUCE SliderAttachment, including when this timer is not running.
     auto invalidate=[this](juce::Rectangle<int> logical) {

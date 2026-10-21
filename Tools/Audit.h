@@ -8,6 +8,8 @@
 
 namespace audit {
 using namespace frostbite;
+inline bool legacyAudit=false;
+inline Values auditDefaults() { return legacyAudit?legacyDefaults():defaults(); }
 constexpr double tau=6.2831853071795864769;
 struct Stats {
     double sum=0, squares=0, l2=0, r2=0, lr=0, sumL=0, sumR=0, peak=0;
@@ -61,6 +63,17 @@ inline juce::AudioBuffer<float> signal(const std::string& kind,double sr,double 
                 const double age=std::fmod(t,.65); constexpr double notes[]{261.626,311.127,391.995,466.164};
                 const double hz=notes[int(t/.65)%4]*(c?1.001:1);
                 for(int h=1;h<=9;++h) x+=std::sin(tau*hz*h*age)*std::exp(-age*(2.5+h*.4))*(1-std::exp(-age*400))/h;
+            } else if(kind=="guitar") {
+                const double age=std::fmod(t,.8);
+                for(double hz:{82.407,123.471,164.814})for(int h=1;h<=12;++h)
+                    x+=std::sin(tau*hz*h*age+c*.02*h)*std::exp(-age*(2+h*.15))*(1-std::exp(-age*700))/h;
+            } else if(kind=="synth") {
+                for(int h=1;h<=15;++h)x+=std::sin(tau*(110+(c?.17:0))*h*t)/h;
+                x*=.65+.35*std::sin(tau*.33*t);
+            } else if(kind=="transient") {
+                const double age=std::fmod(t,.75);
+                random=random*1664525u+1013904223u;
+                x=(double(random>>8)/8388608.0-1)*std::exp(-age*95)+.5*std::sin(tau*75*age)*std::exp(-age*22);
             } else if(kind=="cello") {
                 for(int h=1;h<=9;++h) x+=std::sin(tau*110*h*t+c*.08*h)/h;
                 x*=std::min(1.0,t*5)*std::clamp((seconds-t)*5,0.0,1.0);
@@ -75,13 +88,13 @@ inline juce::AudioBuffer<float> signal(const std::string& kind,double sr,double 
 inline bool wav(const juce::File& dir,const std::string& name,const juce::AudioBuffer<float>& b,double sr) {
     return writeWav(dir.getChildFile(juce::String(name)+".wav"),b,sr);
 }
-inline bool matched(const juce::File& dir,const std::string& name,juce::AudioBuffer<float> b,double sr,int active) {
+inline bool matched(const juce::File& dir,const std::string& name,juce::AudioBuffer<float> b,double sr,int active,float targetDb=-24) {
     Stats s;for(int n=0;n<active;++n)s.add({b.getSample(0,n),b.getSample(1,n)});
-    const double gain=s.rms()>1e-12?dbGain(-24)/s.rms():1;
+    const double gain=s.rms()>1e-12?dbGain(targetDb)/s.rms():1;
     b.applyGain(float(gain));
     // Normalise only to common RMS; refuse hidden clipping rather than peak-normalising each example.
     if(b.getMagnitude(0,b.getNumSamples())>=1) return false;
-    return wav(dir,name+"_rms_minus24",b,sr);
+    return wav(dir,name+"_rms_minus"+std::to_string(int(-targetDb)),b,sr);
 }
 struct Case {std::string name;Values p;bool capture=false;};
 inline juce::AudioBuffer<float> run(const Case& c,const juce::AudioBuffer<float>& input,double sr,int block,double tail,
@@ -115,7 +128,8 @@ inline juce::AudioBuffer<float> run(const Case& c,const juce::AudioBuffer<float>
     for(size_t s=0;s<TraceCount;++s) {stages<<prefix<<','<<names[s];row(stages,sums[s],in.rms());stages<<'\n';}
     return out;
 }
-inline int execute(const juce::File& dir) {
+inline int execute(const juce::File& dir,bool legacy=false) {
+    legacyAudit=legacy;
     if(dir.createDirectory().failed())return 1;
     auto path=[&](const char* n){return dir.getChildFile(n).getFullPathName().toStdString();};
     std::ofstream metrics(path("matrix.csv")), stages(path("stages.csv")),maps(path("macro_map.csv")),presets(path("presets.csv"));
@@ -123,14 +137,14 @@ inline int execute(const juce::File& dir) {
     metrics<<"case,signal,input_peak_dbfs,sample_rate,block"<<columns<<",input_rms,tail_rms,dry_wet_cosine,max_dry_error\n";
     stages<<"case,signal,input_peak_dbfs,sample_rate,block,stage"<<columns<<'\n';
     for(auto* f:{&metrics,&stages,&maps,&presets}) *f<<std::setprecision(10);
-    Values flat=defaults();for(int i=Freeze;i<=Motion;++i)flat[size_t(i)]=0;flat[Output]=0;
+    Values flat=auditDefaults();for(int i=Freeze;i<=Motion;++i)flat[size_t(i)]=0;flat[Output]=0;
     std::vector<Case> cases;
-    auto d=defaults(); auto p=d;p[Bypass]=1;cases.push_back({"bypass",p});
+    auto d=auditDefaults(); auto p=d;p[Bypass]=1;cases.push_back({"bypass",p});
     p=d;p[Mix]=0;cases.push_back({"dry_default_output",p});p[Output]=0;cases.push_back({"dry_unity",p});
     for(float mix:{0.0f,.5f,1.0f}) {p=flat;p[Mix]=mix;cases.push_back({"minimum_mix"+std::to_string(int(mix*100)),p});}
     cases.push_back({"init",d});for(float mix:{.5f,1.0f}) {p=d;p[Mix]=mix;cases.push_back({"init_mix"+std::to_string(int(mix*100)),p});}
     for(auto [param,name]:std::initializer_list<std::pair<Param,const char*>>{{Damage,"damage_max"},{Abyss,"abyss_max"},{Echo,"echo_max"}}) {p=d;p[param]=1;cases.push_back({name,p});}
-    for(const auto& f:factoryPresets())cases.push_back({slug(f.name),f.values});
+    for(const auto& f:factoryPresets())if(!legacy || f.values[Voicing]==0)cases.push_back({slug(f.name),f.values});
     cases.push_back({"Frozen_Cello_capture",factoryPresets()[0].values,true});
     // Coverage matrix includes realistic levels and multiple spectra. Long IRs are measured separately.
     for(const auto& c:cases) {
@@ -145,7 +159,7 @@ inline int execute(const juce::File& dir) {
     }
     for(const std::string kind:{"piano","cello"})if(!wav(dir,"input_"+kind,signal(kind,48000,4,-18),48000))return 2;
     // Sample-rate / segmentation matrix (full regression tests perform additional automation checks).
-    for(double sr:{44100.0,48000.0,96000.0})for(int block:{1,64,257,1024})for(const auto& c:std::vector<Case>{{"rate_init",d},{"rate_dry",cases[2].p},{"rate_max",[]{auto v=defaults();for(int k=0;k<=Mix;++k)v[size_t(k)]=1;v[Drive]=30;v[Feedback]=.94f;v[Decay]=35;return v;}()}}) {
+    for(double sr:{44100.0,48000.0,96000.0})for(int block:{1,64,257,1024})for(const auto& c:std::vector<Case>{{"rate_init",d},{"rate_dry",cases[2].p},{"rate_max",[]{auto v=auditDefaults();for(int k=0;k<=Mix;++k)v[size_t(k)]=1;v[Drive]=30;v[Feedback]=.94f;v[Decay]=35;return v;}()}}) {
         auto input=signal("multitone",sr,.5,-6);run(c,input,sr,block,.1,metrics,stages,"multitone",-6);
     }
     maps<<"macro,position,freeze_level,grain_ms,drift,drive_db,damage_blend,broken,damage_tone,echo_ms,feedback,echo_tone,width,echo_level,size,decay,damping,diffusion,reverb_mod,predelay,reverb_level,distance,motion_depth,motion_rate,mix,output_db,input_db\n";
@@ -159,7 +173,7 @@ inline int execute(const juce::File& dir) {
         auto input=signal("cello",48000,4,-18);run(c,input,48000,256,3,metrics,stages,"cello",-18);
     }
     presets<<"name";for(const auto& info:parameterInfo)presets<<','<<info.id;presets<<'\n';
-    for(const auto& f:factoryPresets()) {presets<<f.name;for(float v:f.values)presets<<','<<v;presets<<'\n';}
+    for(const auto& f:factoryPresets()) if(!legacy || f.values[Voicing]==0) {presets<<f.name;for(float v:f.values)presets<<','<<v;presets<<'\n';}
     // Isolated distortion: unnormalised and common-RMS pairs, high-frequency alias probes.
     for(double sr:{44100.0,48000.0,96000.0})for(float level:{-18.0f,-6.0f})for(float x:{0.0f,.25f,.5f,.75f,1.0f})for(const std::string kind:{"sine1000","sine7301"}) {
         p=d;p[Damage]=x;DamageEngine damage;damage.prepare(sr);damage.configure(mapParameters(p,120));

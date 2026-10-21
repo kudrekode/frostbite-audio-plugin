@@ -20,7 +20,7 @@ public:
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 120; }
-    int getNumPrograms() override { return 8; }
+    int getNumPrograms() override { return int(frostbite::factoryPresets().size()); }
     int getCurrentProgram() override { return currentProgram.load(); }
     void setCurrentProgram(int) override;
     const juce::String getProgramName(int) override;

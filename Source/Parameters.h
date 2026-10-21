@@ -10,5 +10,5 @@ struct ParameterInfo {
 extern const std::array<ParameterInfo,Count> parameterInfo;
 juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 struct FactoryPreset { const char* name; const char* description; Values values; };
-const std::array<FactoryPreset,8>& factoryPresets();
+const std::array<FactoryPreset,18>& factoryPresets();
 }
