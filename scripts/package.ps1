@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([ValidatePattern('^FROSTBITE-[A-Za-z0-9.-]+$')][string]$Name='FROSTBITE-1.0.0-Windows-x64')
+param([ValidatePattern('^FROSTBITE-[A-Za-z0-9.-]+$')][string]$Name='FROSTBITE-2.0.0-Windows-x64')
 $ErrorActionPreference='Stop'
 $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $release=Join-Path $root 'build\Frostbite_artefacts\Release'
@@ -15,16 +15,35 @@ foreach($file in @('readme.md','THIRD_PARTY_NOTICES.md','docs','scripts','Source
     Copy-Item -LiteralPath (Join-Path $root $file) -Destination $destination -Recurse
 }
 New-Item -ItemType Directory -Path (Join-Path $destination 'validation') | Out-Null
-foreach($evidence in @('final-validation.log','render-metrics.txt','host-results.txt','ui-results.txt','installer-results.txt','install-results.txt','studio-one-frostbite-scan.txt','studio-one-postinstall-scan.txt','dsp-render-comparison.txt')) {
+foreach($evidence in @('v2-final-validation.log','host-results.txt','installer-results.txt','v2-summary.log','v2-damage-quality.json')) {
     Copy-Item -LiteralPath (Join-Path $root ('build\'+$evidence)) -Destination (Join-Path $destination 'validation')
 }
 Copy-Item -LiteralPath (Join-Path $root 'build\Testing\Temporary\LastTest.log') -Destination (Join-Path $destination 'validation\ctest-results.txt')
 Copy-Item -LiteralPath (Join-Path $root 'build\qa\ui') -Destination (Join-Path $destination 'validation\ui') -Recurse
-Copy-Item -LiteralPath (Join-Path $root 'build\qa\studio-one') -Destination (Join-Path $destination 'validation\studio-one') -Recurse
-Copy-Item -LiteralPath (Join-Path $root 'build\qa\Factory Presets') -Destination $destination -Recurse
-if(Test-Path -LiteralPath (Join-Path $root 'renders')) {
-    Copy-Item -LiteralPath (Join-Path $root 'renders') -Destination $destination -Recurse
+Copy-Item -LiteralPath (Join-Path $root 'renders\v2\analysis') -Destination (Join-Path $destination 'validation\measurements') -Recurse
+foreach($collection in @('legacy','after')) {
+    $evidenceDirectory=Join-Path $destination ('validation\'+$collection)
+    New-Item -ItemType Directory -Path $evidenceDirectory | Out-Null
+    foreach($pattern in @('*.csv','*.json','*.png')) {
+        Get-ChildItem -LiteralPath (Join-Path $root ('renders\v2\'+$collection)) -Filter $pattern -File |
+            Where-Object Name -ne 'stages.csv' | Copy-Item -Destination $evidenceDirectory
+    }
 }
+Copy-Item -LiteralPath (Join-Path $root 'renders\v2\legacy_check\before_after.csv') -Destination (Join-Path $destination 'validation\legacy-parity.csv')
+# Curated, paired evidence only. Historical Studio One logs are deliberately excluded.
+$audio=Join-Path $destination 'Audio'
+New-Item -ItemType Directory -Path $audio | Out-Null
+foreach($collection in @('legacy','after','audition')) {
+    $audioCollection=Join-Path $audio $collection
+    New-Item -ItemType Directory -Path $audioCollection | Out-Null
+    $patterns=if($collection -eq 'legacy'){@('Frozen_Cello_cello*.wav','Industrial_Fog_cello*.wav','Endless_Winter_cello*.wav','Ruined_Piano_piano*.wav','init_cello*.wav')}
+              elseif($collection -eq 'after'){@('init_cello*.wav')}
+              else{@('*II_cello*.wav','Whiteout_cello*.wav','Cataclysm_cello*.wav','Ruined_Piano_II_piano*.wav','hold_*.wav','input_*.wav')}
+    foreach($pattern in $patterns) {
+        Get-ChildItem -LiteralPath (Join-Path $root ('renders\v2\'+$collection)) -Filter $pattern -File | Copy-Item -Destination $audioCollection
+    }
+}
+Copy-Item -LiteralPath (Join-Path $root 'docs\FROSTBITE_V2_AUDITION.md') -Destination (Join-Path $audio 'READ_ME.md')
 $notices=Join-Path $destination 'licenses'
 New-Item -ItemType Directory -Path $notices | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'external\JUCE\LICENSE.md') -Destination (Join-Path $notices 'JUCE-LICENSE.md')

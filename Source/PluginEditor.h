@@ -47,9 +47,9 @@ private:
     juce::TextButton capture{"CAPTURE"},bypass{"BYPASS"},advanced{"DETAILS"},previous{"<"},next{">"},save{"SAVE"},load{"LOAD"},init{"INIT"};
     juce::TextButton sync{"TEMPO SYNC"};
     std::array<juce::TextButton,4> tabs;
-    juce::ComboBox presets,division,character;
+    juce::ComboBox presets,division,character,voicing,freezeMode,freezeRouting;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> captureAttachment,bypassAttachment,syncAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> divisionAttachment,characterAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> divisionAttachment,characterAttachment,voicingAttachment,freezeModeAttachment,freezeRoutingAttachment;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::TooltipWindow tooltips{this,600};
     bool details=false;

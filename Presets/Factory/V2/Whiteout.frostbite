@@ -1,0 +1,40 @@
+<?xml version='1.0' encoding='utf-8'?>
+<FrostbiteState presetName="Whiteout" schema="2" program="16">
+  <PARAM id="freeze" value="1" />
+  <PARAM id="damage" value="0.16" />
+  <PARAM id="distance" value="0.12" />
+  <PARAM id="echo" value="0.48" />
+  <PARAM id="abyss" value="1" />
+  <PARAM id="motion" value="0.5" />
+  <PARAM id="mix" value="0.9" />
+  <PARAM id="output" value="-3" />
+  <PARAM id="capture" value="0" />
+  <PARAM id="bypass" value="0" />
+  <PARAM id="texture" value="400" />
+  <PARAM id="drift" value="0.22" />
+  <PARAM id="freeze_level" value="0" />
+  <PARAM id="echo_ms" value="420" />
+  <PARAM id="echo_sync" value="1" />
+  <PARAM id="echo_division" value="3" />
+  <PARAM id="feedback" value="0.8" />
+  <PARAM id="echo_tone" value="5500" />
+  <PARAM id="width" value="1" />
+  <PARAM id="echo_level" value="1" />
+  <PARAM id="size" value="1" />
+  <PARAM id="decay" value="35" />
+  <PARAM id="damping" value="0.18" />
+  <PARAM id="diffusion" value="0.78" />
+  <PARAM id="reverb_mod" value="0.3" />
+  <PARAM id="predelay" value="28" />
+  <PARAM id="reverb_level" value="1" />
+  <PARAM id="drive" value="0" />
+  <PARAM id="character" value="0" />
+  <PARAM id="damage_tone" value="7500" />
+  <PARAM id="damage_blend" value="1" />
+  <PARAM id="motion_rate" value="0.16" />
+  <PARAM id="motion_depth" value="0.35" />
+  <PARAM id="input" value="0" />
+  <PARAM id="voicing" value="1" />
+  <PARAM id="freeze_mode" value="1" />
+  <PARAM id="freeze_routing" value="0" />
+</FrostbiteState>

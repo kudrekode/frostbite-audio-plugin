@@ -11,7 +11,7 @@ class HostAutomationCheck final : private juce::Timer {
 public:
     explicit HostAutomationCheck(juce::AudioPluginInstance& instance):plugin(instance) {
         for(auto name:{"Freeze","Damage","Distance","Echo","Abyss","Motion","Mix","Output",
-                       "Grain size","Echo time","Feedback","Decay","Echo tone","Motion rate","Extra drive"}) {
+                       "Grain size","Echo time","Feedback","Decay","Echo tone","Motion rate","Extra drive","Voicing","Freeze mode","Frozen routing"}) {
             juce::AudioProcessorParameter* found=nullptr;
             for(auto* p:plugin.getParameters()) if(p->getName(128)==name) found=p;
             check(found!=nullptr,"Missing exported VST3 parameter: "+juce::String(name));
@@ -34,14 +34,18 @@ private:
     juce::AudioBuffer<float> audio{2,128};
     juce::MidiBuffer midi;
     std::exception_ptr failure;
+    float targetValue() const {
+        const auto* p=parameters[control];const float value=float(state)*.5f;
+        return p->isDiscrete() && p->getNumSteps()>1?std::round(value*float(p->getNumSteps()-1))/float(p->getNumSteps()-1):value;
+    }
     void setFromHost() {
-        std::thread worker([&] { parameters[control]->setValueNotifyingHost(float(state)*.5f); });worker.join();
+        std::thread worker([&] { parameters[control]->setValueNotifyingHost(targetValue()); });worker.join();
     }
     void timerCallback() override {
         try {
             audio.clear();plugin.processBlock(audio,midi);
             auto* p=parameters[control];
-            check(std::abs(p->getValue()-float(state)*.5f)<.006f,"VST3 automation value mismatch: "+p->getName(128));
+            check(std::abs(p->getValue()-targetValue())<.006f,"VST3 automation value mismatch: "+p->getName(128));
             for(int c=0;c<2;++c) for(int n=0;n<audio.getNumSamples();++n)
                 check(std::isfinite(audio.getSample(c,n)),"VST3 automated output nonfinite");
             if(++state==3) { state=0;++control; }
@@ -69,7 +73,7 @@ int main(int argc,char** argv) {
         juce::MemoryBlock saved;plugin->getStateInformation(saved);check(saved.getSize()>0,"Empty VST3 state");
         std::vector<float> initial;for(auto* parameter:plugin->getParameters()) initial.push_back(parameter->getValue());
         double energy=0;float peak=0;
-        for(double sr:{44100.0,48000.0,96000.0}) for(int size:{64,128,512,1024}) {
+        for(double sr:{44100.0,48000.0,96000.0}) for(int size:{1,64,128,256,512,1024}) {
             plugin->setRateAndBufferSizeDetails(sr,size);plugin->prepareToPlay(sr,size);
             juce::AudioBuffer<float> audio(2,size);juce::MidiBuffer midi;
             for(int block=0;block<150;++block) {
@@ -97,7 +101,7 @@ int main(int argc,char** argv) {
             check(std::abs(plugin->getParameters()[i]->getValue()-initial[size_t(i)])<.002f,"VST3 state restore after automation");
         editor.reset(plugin->createEditorIfNeeded());check(editor!=nullptr,"VST3 editor reopen after automation/state restore");editor.reset();
         std::cout<<"PASS VST3 scan, effect metadata, instantiate, "<<plugin->getParameters().size()
-            <<" parameters, state, 12 sample-rate/block configurations; 15 parameters automated off-thread at min/mid/max, state restore and editor reopen (native editor pixels require host acceptance); peak="<<peak<<"\n";
+            <<" parameters, state, 18 sample-rate/block configurations; 18 parameters automated off-thread at min/mid/max, state restore and editor reopen (native editor pixels require host acceptance); peak="<<peak<<"\n";
         return 0;
     }catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<"\n";return 1;}
 }

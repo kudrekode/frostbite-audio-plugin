@@ -1,8 +1,8 @@
-# FROSTBITE
+# FROSTBITE V2
 
-A Windows x64 VST3 effect for held granular textures, dark ping-pong echoes, nonlinear damage and vast stereo ambience. C++20 / JUCE 9.0.4. All six engines process audio; controls use host automation and state persistence.
+A Windows x64 VST3 effect for live and held granular textures, dark ping-pong echoes, nonlinear damage and vast stereo ambience. C++20 / JUCE 9.0.4. All six engines process audio; controls use host automation and state persistence.
 
-![FROSTBITE editor](docs/editor.png)
+![FROSTBITE editor](docs/editor-v2.png)
 
 The release ZIP includes the compiled bundle, `FROSTBITE.exe` for live input, `frostbite_render.exe --audition` for file playback, source code, factory preset files, diagnostic WAVs and installation scripts. Run `.\scripts\install.ps1 -Scope User` from the extracted package to install.
 
@@ -23,7 +23,7 @@ cmake --preset windows-x64
 cmake --build --preset release
 ctest --preset release
 .\build\frostbite_host_check_artefacts\Release\frostbite_host_check.exe "$PWD\build\Frostbite_artefacts\Release\VST3\FROSTBITE.vst3"
-.\build\frostbite_render_artefacts\Release\frostbite_render.exe --diagnostics "$PWD\renders"
+.\build\frostbite_render_artefacts\Release\frostbite_render.exe --diagnostics "$PWD\renders\v2\diagnostics"
 ```
 
 First configure downloads JUCE unless `external/JUCE` exists. The dependency is pinned to 9.0.4; no Python, Node, network or JUCE installation is needed at plugin runtime. MSVC runtime is statically linked.
@@ -50,7 +50,7 @@ Some hosts do not scan the user folder automatically. Add it to Studio One's VST
 
 ## Play
 
-Start with **Frozen Cello**. Play a sustained note for one or two seconds, then press **Capture**. This holds the preceding stereo audio in four overlapping grains. The Freeze macro controls its prominence; **Release** fades it out. Presets do not contain captured recordings.
+Start with **Frozen Cello II** in **V2 / LIVE TEXTURE**. Play normally to build a granular atmosphere. **Capture** holds the preceding stereo audio; **Release** resumes live texture, or fades the grains in Hold mode. **INTO DAMAGE + ECHO** lets those effects transform the texture after you stop playing. Legacy voicing and all eight original presets remain available. Presets do not contain captured recordings.
 
 Six macros shape the sound; Mix blends the original signal and Output trims the final level. **Details** exposes grain controls, tempo/divisions, feedback, reverb, nonlinear character and modulation. Double-click knobs to reset, Shift-drag for finer adjustment, or edit the number. Save/Load uses `.frostbite` XML preset files; the default directory is `%APPDATA%\Frostbite\Presets`.
 
@@ -62,7 +62,7 @@ The JUCE standalone opens an audio device and offers device settings; use headph
 
 In the release package, run `.\frostbite_render.exe --audition`. It accepts WAV, AIFF and FLAC, and resamples to the output device rate with linear interpolation. Stop halts the file while effect tails and captured audio continue. Loading a different file resets the processor.
 
-See [audition guide](docs/AUDITION.md), [DSP design](docs/ENGINEERING.md) and [Studio One checklist](docs/STUDIO_ONE_CHECKLIST.md).
+See the [V2 audition and installation guide](docs/FROSTBITE_V2_AUDITION.md), [implementation and measurements](docs/FROSTBITE_V2_IMPLEMENTATION.md), and [state compatibility rules](docs/FROSTBITE_V2_COMPATIBILITY.md).
 
 ## Scope and limitations
 
@@ -70,8 +70,8 @@ See [audition guide](docs/AUDITION.md), [DSP design](docs/ENGINEERING.md) and [S
 - DSP tests, rendered waveforms and host checks establish engineering behavior, not subjective musical quality. First listening/tuning with real instruments remains essential.
 - No oversampling; ADAA reduces nonlinear aliasing but does not eliminate it.
 - The reported 120-second tail is finite; held granular audio can continue until released.
-- V1 has no MIDI control, spectral freeze, preset search or visual node graph.
+- There is no MIDI control, spectral freeze, preset search or visual node graph.
 - macOS builds are unverified. The DSP is portable; on a Mac install Xcode/CMake, configure with Ninja or Xcode, and add `AU` to `FORMATS`. Build/test separately for `arm64;x86_64`, then handle signing, notarization and packaging. No macOS compatibility is claimed.
 - Review [dependency licensing](THIRD_PARTY_NOTICES.md) before distribution.
 
-The factual build/test status is recorded in [completion report](docs/COMPLETION.md). The subsequent [UI feedback repair report](docs/UI_REPAIR.md) includes control regression evidence and the pending Studio One acceptance checks. Installer backups are preserved outside VST3 scan folders so previous builds cannot be rediscovered as duplicate plugins.
+The current build/test status is in the [V2 implementation report](docs/FROSTBITE_V2_IMPLEMENTATION.md). The [original completion report](docs/COMPLETION.md) is historical evidence. The subsequent [UI feedback repair report](docs/UI_REPAIR.md) includes control regression evidence and the pending Studio One acceptance checks. Installer backups are preserved outside VST3 scan folders so previous builds cannot be rediscovered as duplicate plugins.

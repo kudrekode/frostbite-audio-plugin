@@ -128,7 +128,7 @@ int main() {
     });
     test("All sample rates/block sizes, silence, extreme automation, nonfinite input",[] {
         for(double sr:{44100.0,48000.0,96000.0}) for(int block:{64,128,512,1024}) {
-            Engine e; e.prepare(sr,block); auto p=defaults(); e.setParameters(p);
+            Engine e; e.prepare(sr,block); auto p=legacyDefaults(); e.setParameters(p);
             std::vector<float> l(size_t(block),0),r(size_t(block),0);
             e.process(l.data(),r.data(),block);
             for(auto x:l) require(x==0,"nonzero idle output");
@@ -146,7 +146,7 @@ int main() {
         }
     });
     test("No heap allocations in process, including capture and automation",[] {
-        Engine e; e.prepare(48000,512); auto p=defaults();
+        Engine e; e.prepare(48000,512); auto p=legacyDefaults();
         std::array<float,512> l{},r{};
         allocations=0; watchAllocations=true;
         for(int n=0;n<400;++n) {
@@ -187,7 +187,7 @@ int main() {
         Engine realtime,offline; realtime.prepare(48000,257); offline.prepare(48000,257);
         std::array<float,257> l{},r{},ol{},orr{};
         std::array<TraceFrame,257> frames{};
-        auto p=defaults();
+        auto p=legacyDefaults();
         for(int block=0;block<200;++block) {
             p[Capture]=block>=80 && block<140?1.0f:0.0f;
             p[Damage]=float(block%40)/39.0f;
@@ -210,17 +210,17 @@ int main() {
     });
     test("Mix zero / bypass are exact, echo/reverb level zero contribute nothing",[] {
         Engine a,b; a.prepare(48000,128); b.prepare(48000,128);
-        auto p=defaults(); p[Mix]=0; p[Output]=0; a.setParameters(p); p[Mix]=1; p[Bypass]=1;b.setParameters(p);
+        auto p=legacyDefaults(); p[Mix]=0; p[Output]=0; a.setParameters(p); p[Mix]=1; p[Bypass]=1;b.setParameters(p);
         std::array<float,128> l{},r{},lb{},rb{};
         for(size_t n=0;n<128;++n) l[n]=r[n]=lb[n]=rb[n]=.3f*std::sin(float(n)*.07f);
         a.process(l.data(),r.data(),128);b.process(lb.data(),rb.data(),128);
         for(size_t n=0;n<128;++n) require(l[n]==.3f*std::sin(float(n)*.07f) && lb[n]==l[n],"dry/bypass mismatch");
-        p=defaults();p[EchoLevel]=p[ReverbLevel]=0;
+        p=legacyDefaults();p[EchoLevel]=p[ReverbLevel]=0;
         auto m=mapParameters(p,120);require(m.echoLevel==0 && m.reverbLevel==0,"zero levels not respected");
     });
     test("Dry output automation reaches unity smoothly",[] {
         for(double sr:{44100.0,48000.0,96000.0}) {
-            Engine e; e.prepare(sr,256); auto p=defaults();
+            Engine e; e.prepare(sr,256); auto p=legacyDefaults();
             p[Mix]=0; p[Output]=-24; e.setParameters(p);
             std::array<float,256> l{},r{}; l.fill(.25f); r.fill(-.125f);
             e.process(l.data(),r.data(),256);
@@ -235,7 +235,7 @@ int main() {
         }
     });
     test("Reverb fine level zero mutes the returned tail with Distance active",[] {
-        Engine e; e.prepare(48000,128); auto p=defaults();
+        Engine e; e.prepare(48000,128); auto p=legacyDefaults();
         p[Distance]=.8f; p[ReverbLevel]=0; p[Abyss]=1; p[Echo]=0; p[Motion]=0;
         p[Damage]=0; p[Freeze]=0; p[Mix]=1; p[Output]=0; e.setParameters(p);
         std::array<float,128> l{},r{};
@@ -255,7 +255,7 @@ int main() {
     test("Linear Mix preserves midpoint for correlated, partial and frozen signals",[] {
         for(int scenario:{0,1,2}) {
             Engine wet,half; wet.prepare(48000,128); half.prepare(48000,128);
-            auto p=defaults(); p[Damage]=scenario==2?1.0f:0.0f; p[Drive]=scenario==2?30.0f:6.0f;
+            auto p=legacyDefaults(); p[Damage]=scenario==2?1.0f:0.0f; p[Drive]=scenario==2?30.0f:6.0f;
             p[Freeze]=scenario==2?1.0f:0.0f; p[FreezeLevel]=6;
             p[Echo]=scenario==1?.7f:0.0f;
             p[Abyss]=scenario==1?1.0f:0.0f; p[Distance]=0; p[Motion]=0; p[Output]=0;
@@ -287,11 +287,11 @@ int main() {
         }
     });
     test("Macro progression and documented endpoint ranges",[] {
-        auto p=defaults();
+        auto p=legacyDefaults();
         for(size_t macro=Freeze;macro<=Motion;++macro) {
             Mapped prior{};
             for(int step=0;step<=4;++step) {
-                p=defaults(); p[macro]=float(step)*.25f; const auto m=mapParameters(p,120);
+                p=legacyDefaults(); p[macro]=float(step)*.25f; const auto m=mapParameters(p,120);
                 if(step>0) {
                     switch(macro) {
                         case Freeze: require(m.freezeLevel>prior.freezeLevel,"Freeze dead zone"); break;
@@ -310,7 +310,7 @@ int main() {
                 prior=m;
             }
         }
-        p=defaults(); p[Freeze]=p[Damage]=p[Echo]=p[Abyss]=p[Motion]=0;
+        p=legacyDefaults(); p[Freeze]=p[Damage]=p[Echo]=p[Abyss]=p[Motion]=0;
         auto m=mapParameters(p,120);
         require(m.freezeLevel==0 && m.damageBlend==0 && m.echoLevel==0 && m.reverbLevel==0
             && m.motionDepth==0,"macro zero return endpoints");
@@ -330,6 +330,90 @@ int main() {
             require(m.output>previous && std::abs(20*std::log10(m.output)-db)<1e-4f,"Output gain calibration");
             previous=m.output;
         }
+    });
+
+    test("V2 neutral wet and dry unity at every supported rate",[] {
+        for(double rate:{44100.0,48000.0,96000.0}) for(float mix:{0.0f,.5f,1.0f}) {
+            Engine e; auto p=defaults();for(size_t k=Freeze;k<=Motion;++k)p[k]=0;p[Mix]=mix;
+            e.setParameters(p);e.prepare(rate,128); std::array<float,128> l{},r{};
+            for(int b=0;b<50;++b) {
+                for(int i=0;i<128;++i){l[size_t(i)]=.25f*std::sin(float(b*128+i)*.071f);r[size_t(i)]=-.7f*l[size_t(i)];}
+                const auto a=l,c=r;e.process(l.data(),r.data(),128);
+                require(l==a && r==c,"neutral wet has hidden attenuation or phase change");
+            }
+        }
+    });
+    test("V2 live grains retain stereo, replace source, and clear on silence",[] {
+        for(double rate:{44100.0,48000.0,96000.0}) {
+            LiveTextureEngine live;live.prepare(rate);live.configure(400,1);
+            double early=0,replaced=0,cleared=0;
+            for(int n=0;n<int(rate*5);++n) {
+                const auto y=live.process(n<int(rate)?Stereo{.2f,0}:n<int(2*rate)?Stereo{0,.2f}:Stereo{});
+                require(good(y),"bad live output");
+                if(n>rate*.8 && n<rate) early+=y.l*y.l;
+                if(n>rate*1.8 && n<2*rate) replaced+=y.r*y.r;
+                if(n>4*rate) cleared+=energy(y);
+            }
+            require(early>1 && replaced>1,"live texture failed to follow real source");
+            require(cleared==0,"live source retained stale material after silence");
+        }
+    });
+    test("V2 held texture feeds Damage and Echo only in processed routing",[] {
+        auto render=[](bool routed,bool damaged) {
+            Engine e;auto p=defaults();p[Freeze]=1;p[FreezeMode]=0;p[FreezeRouting]=routed?1.0f:0.0f;
+            p[Damage]=damaged?1.0f:0.0f;p[Character]=1;p[Echo]=.8f;p[EchoSync]=0;p[EchoMs]=100;
+            p[Distance]=p[Abyss]=p[Motion]=0;p[Mix]=1;e.setParameters(p);e.prepare(48000,128);
+            std::array<float,128> l{},r{};std::array<TraceFrame,128> trace{};double shape=0,echo=0;
+            for(int b=0;b<1500;++b) {
+                if(b==500){p[Capture]=1;e.setParameters(p);}
+                for(int n=0;n<128;++n)l[size_t(n)]=r[size_t(n)]=b<500?.1f*std::sin(float(b*128+n)*.04f):0;
+                e.processOffline(l.data(),r.data(),128,trace.data());
+                if(b>1000) for(const auto& frame:trace) {
+                    shape+=energy(frame.stages[DamageOut]);echo+=energy(frame.stages[EchoReturn]);
+                }
+            }
+            return std::array<double,2>{shape,echo};
+        };
+        const auto clean=render(false,true),routed=render(true,true),unshaped=render(true,false);
+        require(clean[0]==0 && clean[1]<1e-6,"clean grains leaked into nonlinear route");
+        require(routed[0]>1 && routed[1]>1,"held grains did not reach Damage/Echo");
+        require(std::abs(routed[0]-unshaped[0])>1,"Damage cannot transform held texture");
+    });
+    test("V2 safety/automation and no allocation across full rate/block matrix",[] {
+        for(double rate:{44100.0,48000.0,96000.0})for(int block:{1,64,128,256,512,1024}) {
+            Engine e;auto p=defaults();e.setParameters(p);e.prepare(rate,block);
+            std::vector<float> l(size_t(block),0),r(size_t(block),0);
+            allocations=0;bool bounded=true;watchAllocations=true;
+            for(int b=0;b<std::max(120,int(rate*2)/block);++b) {
+                const int tick=int(double(b*block)/(rate*.08));
+                for(size_t k=Freeze;k<=Mix;++k)p[k]=tick%3?1.0f:0.0f;
+                p[Capture]=float(tick%2);p[FreezeMode]=float((tick/3)%2);p[FreezeRouting]=float((tick/7)%2);
+                p[Bypass]=tick%11==0?1.0f:0.0f;p[Input]=12;p[Output]=6;p[Drive]=30;p[Feedback]=.94f;p[Decay]=35;
+                p[EchoMs]=tick%2?20.0f:2000.0f;e.setParameters(p);
+                for(int n=0;n<block;++n){l[size_t(n)]=.5f*std::sin(float(b*block+n)*.117f);r[size_t(n)]=-.7f*l[size_t(n)];}
+                e.process(l.data(),r.data(),block);
+                for(int n=0;n<block;++n)bounded=bounded && std::isfinite(l[size_t(n)]) && std::isfinite(r[size_t(n)]) && std::abs(l[size_t(n)])<=1 && std::abs(r[size_t(n)])<=1;
+            }
+            watchAllocations=false;require(allocations==0,"V2 callback allocated");require(bounded,"V2 automation unstable");
+        }
+    });
+    test("V2 maximum Warm and Broken remain distinct after level matching",[] {
+        DamageEngine warm,broken;warm.prepare(48000);broken.prepare(48000);
+        auto p=defaults();p[Damage]=1;p[Character]=0;warm.configure(mapParameters(p,120));
+        p[Character]=1;broken.configure(mapParameters(p,120));double aa=0,bb=0,ab=0;
+        for(int n=0;n<48000;++n){const float x=.125f*std::sin(2*pi*1000*n/48000);const auto a=warm.process({x,x}),b=broken.process({x,x});if(n>12000){aa+=a.l*a.l;bb+=b.l*b.l;ab+=a.l*b.l;}}
+        require(ab/std::sqrt(aa*bb)<.999,"Warm/Broken difference is only gain");
+    });
+    test("V2 maximum hall remains finite and decays over a long silent tail",[] {
+        ReverbEngine reverb;reverb.prepare(48000);auto p=defaults();p[Abyss]=p[Size]=p[ReverbMod]=1;p[Damping]=0;p[Decay]=35;
+        reverb.configure(mapParameters(p,120));double early=0,late=0;float peak=0;
+        for(int n=0;n<48000*90;++n) {
+            const auto y=reverb.process(n<48000?Stereo{.12f*std::sin(n*.157f),.1f*std::sin(n*.077f)}:Stereo{});
+            require(good(y),"V2 long reverb invalid");peak=std::max({peak,std::abs(y.l),std::abs(y.r)});
+            if(n>48000*5 && n<48000*10)early+=energy(y);
+            if(n>48000*85)late+=energy(y);
+        }
+        require(peak<2,"V2 reverb excessive raw energy");require(late<early*.001,"V2 tail fails to decay");
     });
     std::cout<<passed<<" passed, "<<failed<<" failed\n"; return failed?1:0;
 }
