@@ -1,0 +1,13 @@
+{
+  "matrix_rows": 508,
+  "invalid_stage_samples": 0.0,
+  "peak_output": 0.6036515236,
+  "matched_target_rms_dbfs": -24,
+  "input_levels_are": "sample peak dBFS",
+  "warnings": [
+    "RMS is not perceived loudness/LUFS; no listening assessment.",
+    "Reverb T20 is -5 to -25 dB fit extrapolated to 60 dB, with finite 40s/24bit IR.",
+    "Nonharmonic residual includes aliasing, numerical error and 24bit quantisation.",
+    "Preset cosine is waveform similarity, not a perceptual identity score."
+  ]
+}

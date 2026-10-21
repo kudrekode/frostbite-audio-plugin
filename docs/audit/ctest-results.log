@@ -1,0 +1,69 @@
+Start testing: Oct 21 09:47 GMT Summer Time
+----------------------------------------------------------
+1/3 Testing: DSP
+1/3 Test: DSP
+Command: "C:/Users/jadcr/Documents/Code/frostbite-plugin/build/Release/frostbite_dsp_tests.exe"
+Directory: C:/Users/jadcr/Documents/Code/frostbite-plugin/build
+"DSP" start time: Oct 21 09:47 GMT Summer Time
+Output:
+----------------------------------------------------------
+PASS Freeze captures stereo audio, sustains, releases and stays bounded
+PASS Freeze is edge-triggered and supports short/empty captures
+PASS Echo exact timing, stereo alternation, decaying repeats
+PASS Echo BPM, dotted/triplet divisions and fallback
+PASS Echo maximum feedback and abrupt time changes remain finite
+PASS Reverb diffuse stereo tail, decay control and DC
+PASS Damage changes harmonics, modes differ, blend zero is exact
+PASS Distance changes spectrum without muting, Motion changes stereo
+PASS All sample rates/block sizes, silence, extreme automation, nonfinite input
+PASS No heap allocations in process, including capture and automation
+PASS Maximum reverb decay survives noise, sweep and a long tail
+PASS Variable block segmentation produces identical audio
+PASS Offline stage trace is sample-identical to production processing
+PASS Mix zero / bypass are exact, echo/reverb level zero contribute nothing
+PASS Dry output automation reaches unity smoothly
+PASS Reverb fine level zero mutes the returned tail with Distance active
+PASS Linear Mix preserves midpoint for correlated, partial and frozen signals
+PASS Macro progression and documented endpoint ranges
+18 passed, 0 failed
+<end of output>
+Test time =   5.46 sec
+----------------------------------------------------------
+Test Passed.
+"DSP" end time: Oct 21 09:47 GMT Summer Time
+"DSP" time elapsed: 00:00:05
+----------------------------------------------------------
+
+2/3 Testing: Plugin
+2/3 Test: Plugin
+Command: "C:/Users/jadcr/Documents/Code/frostbite-plugin/build/frostbite_tests_artefacts/Release/frostbite_tests.exe"
+Directory: C:/Users/jadcr/Documents/Code/frostbite-plugin/build
+"Plugin" start time: Oct 21 09:47 GMT Summer Time
+Output:
+----------------------------------------------------------
+PASS plugin defaults, 34 stable parameter IDs/order/versions, eight shipped and saved presets, full/legacy/rejected state, dry and host-bypass unity in 24 mono/stereo rate/buffer configurations, variable buffers, editor snapshots
+<end of output>
+Test time =   2.85 sec
+----------------------------------------------------------
+Test Passed.
+"Plugin" end time: Oct 21 09:47 GMT Summer Time
+"Plugin" time elapsed: 00:00:02
+----------------------------------------------------------
+
+3/3 Testing: UI
+3/3 Test: UI
+Command: "C:/Users/jadcr/Documents/Code/frostbite-plugin/build/frostbite_ui_tests_artefacts/Release/frostbite_ui_tests.exe"
+Directory: C:/Users/jadcr/Documents/Code/frostbite-plugin/build
+"UI" start time: Oct 21 09:47 GMT Summer Time
+Output:
+----------------------------------------------------------
+PASS UI: 29 rotary controls, 3 buttons, 2 choices; off-thread host updates; rendered min/mid/max arcs, indicators and text; mouse drag, reset, numeric entry; eight presets, preset/state restore, reopen, pending attachment destruction, scaled snapshots; native peer recreation and immediate paints without timer dispatch; actual popup per-row mouse hover, selected tick, keyboard focus/navigation/selection/dismissal
+<end of output>
+Test time =  26.33 sec
+----------------------------------------------------------
+Test Passed.
+"UI" end time: Oct 21 09:47 GMT Summer Time
+"UI" time elapsed: 00:00:26
+----------------------------------------------------------
+
+End testing: Oct 21 09:47 GMT Summer Time
